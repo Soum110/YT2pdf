@@ -391,6 +391,7 @@ async def health():
 
     return {
         "status": "ok",
+        "commit": "87d9053",
         "api_key_set": bool(GEMINI_API_KEY),
         "cookies_set": bool(cookies_val) or cookie_file.exists(),
         "cookies_source": cookies_source,
