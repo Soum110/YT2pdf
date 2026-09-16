@@ -1,0 +1,12 @@
+# Robots.txt for YT2PDFS
+# Search engine crawler instructions and sitemap index
+
+User-agent: *
+Allow: /
+Allow: /static/
+Disallow: /api/
+Disallow: /jobs/
+
+# XML Sitemap
+Sitemap: https://yt2pdfs.com/sitemap.xml
+

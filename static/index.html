@@ -1,0 +1,2595 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <!-- Google tag (gtag.js) -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-4F8BNW2XZB"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+
+    gtag('config', 'G-4F8BNW2XZB');
+  </script>
+  <meta charset="UTF-8" />
+  <script>
+    (function() {
+      try {
+        var saved = localStorage.getItem('yt2pdf_theme');
+        var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+        var theme = saved ? saved : (prefersDark ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (e) {}
+    })();
+  </script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <title>YT2PDFS — Free YouTube to PDF Converter & AI Notes Online</title>
+  <meta name="description" content="Convert YouTube video to PDF online free with YT2PDFS (YT to PDF). Best AI video to PDF converter to extract presentation slides and generate AI study notes from any YouTube link." />
+  <meta name="keywords" content="yt2pdfs, yt to pdf, youtube to pdf, yt2pdf, youtube video to pdf converter, youtube video convert to pdf, youtube link to pdf converter, convert youtube video to pdf online free, convert youtube to pdf, video to pdf converter, video pdf converter, youtube to pdf free, youtube to pdf online, youtube to pdf file, youtube to pdf notes ai, video youtube to pdf, youtube to pdf converter ai, youtube to pdf download, ai youtube to pdf" />
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+  <link rel="canonical" href="https://yt2pdfs.com/" />
+
+  <!-- Favicon & App Icons -->
+  <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+
+  <!-- Open Graph / Facebook / LinkedIn -->
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="YT2PDFS" />
+  <meta property="og:url" content="https://yt2pdfs.com/" />
+  <meta property="og:title" content="YT2PDFS — Free YouTube to PDF Converter & AI Notes Online" />
+  <meta property="og:description" content="Convert YouTube video to PDF online free. Fast AI video to PDF converter that extracts pure presentation slides and generates comprehensive study guides." />
+  <meta property="og:image" content="/brand-icon.png" />
+
+  <!-- Twitter / X -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="YT2PDFS — YouTube to PDF Converter (Free AI Video to PDF)" />
+  <meta name="twitter:description" content="Convert YouTube video to PDF online free with YT2PDFS. Extract presentation slides and generate AI lecture notes from any YouTube link." />
+  <meta name="twitter:image" content="/brand-icon.png" />
+
+  <!-- Theme Color & Web App Tags -->
+  <meta name="theme-color" content="#141414" media="(prefers-color-scheme: dark)" />
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+  <meta name="application-name" content="YT2PDFS" />
+  <meta name="apple-mobile-web-app-title" content="YT2PDFS" />
+
+  <!-- Schema.org JSON-LD Structured Data for Rich Snippets -->
+  <!-- Schema.org JSON-LD Structured Data for Rich Snippets -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "YT2PDFS",
+    "alternateName": [
+      "YT to PDF",
+      "YouTube to PDF",
+      "YT2PDF",
+      "YouTube Video to PDF Converter",
+      "Video to PDF Converter",
+      "AI YouTube to PDF"
+    ],
+    "url": "https://yt2pdfs.com/",
+    "applicationCategory": "EducationalApplication",
+    "operatingSystem": "All",
+    "browserRequirements": "Requires JavaScript. Works on all modern browsers.",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    },
+    "description": "Convert YouTube video to PDF online free with YT2PDFS. Extract presentation slides and generate AI study notes from any YouTube link.",
+    "featureList": [
+      "Convert YouTube video to PDF online free",
+      "YouTube link to PDF converter",
+      "AI YouTube to PDF notes generator",
+      "OpenCV computer vision slide extraction",
+      "Slide Deck Studio with interactive preview and curation",
+      "LaTeX formula transcription and solved problems"
+    ]
+  }
+  </script>
+
+  <!-- Schema.org FAQPage Structured Data -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "Can I convert a YouTube video to PDF?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "<p>Yes, you can easily convert any YouTube video to PDF using YT2PDFS. Simply paste the YouTube video link into the converter and click Convert to PDF. The system automatically detects slide scene transitions, eliminates duplicate frames and speaker webcam overlays, and compiles high-resolution presentation slides into a clean, downloadable PDF.</p>"
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Is there a free version of the YouTube video to PDF tool?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "<p>Yes! YT2PDFS is 100% free to use online. There are no subscriptions, no credit card requirements, no hidden fees, and no watermarks on your generated PDFs. You can convert unlimited YouTube videos to PDF slide decks and AI study notes for free.</p>"
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Does it work as a YouTube video to PDF converter?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "<p>Yes, YT2PDFS functions as a dedicated, automated YouTube video to PDF converter. It analyzes video streams frame-by-frame using computer vision algorithms, filters out motion blur, presenter overlays, and transitional animations, and outputs publication-quality PDF slide documents along with structured lecture notes.</p>"
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "What is the optimal video length for best YouTube to PDF notes conversion?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "<p>YT2PDFS is optimized to handle YouTube videos of any duration, from quick 5-minute tutorials to in-depth 2-to-3 hour academic lectures and conference keynotes. For the fastest conversion speed and most concise AI notes, videos between 10 to 60 minutes are ideal. Multi-hour lectures are automatically batched to ensure maximum slide clarity and note depth.</p>"
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "How accurate are the videos to pdf notes?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "<p>The notes generated by YT2PDFS are exceptionally accurate. Our system pairs multimodal AI with computer vision OCR and speech transcript alignment. It captures complex mathematical proofs, KaTeX LaTeX formulas, code snippets, terminology, and visual diagrams directly from the slides and audio lecture, providing comprehensive, university-grade study guides.</p>"
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Is video to PDF conversion safe?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "<p>Yes, video to PDF conversion with YT2PDFS is completely safe and secure. All processing occurs through encrypted HTTPS connections. We do not store your private credentials, we never inject malware or third-party ads, and extracted slides and generated PDF files are securely delivered directly to your browser for download.</p>"
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "how to convert youtube video to pdf",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "<p>Converting a YouTube video to PDF takes 3 simple steps: 1. Copy the YouTube URL from your browser address bar or share menu. 2. Paste the link into the YT2PDFS search box and click 'Convert to PDF'. 3. Preview your extracted slides in the interactive Slide Deck Studio, remove unwanted pages, and click 'Download PDF' to save your file.</p>"
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "how to delete page/slides in pdf file youtube",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "<p>To delete or exclude unwanted pages before downloading your PDF: 1. Once processing finishes, review the slides in the interactive Slide Deck Studio. 2. Each slide card has a Delete (✕) button and selection checkbox—click delete or uncheck any duplicate or blurry slides. 3. Click 'Compile &amp; Download PDF' to generate a clean PDF containing only your selected slides.</p>"
+        }
+      }
+    ]
+  }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;450;500;600;650;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    
+    :root {
+      /* Mobbin Design System Color Palette (Light) */
+      --canvas: #ffffff;
+      --canvas-soft: #f3f3f3;
+      --field: #f0f0f0;
+      --hairline-soft: #f0f0f0;
+      --hairline: #e0e0e0;
+      
+      --primary: #141414;
+      --on-primary: #ffffff;
+      --ink: #141414;
+      --ink-soft: #262626;
+      --text-muted: #707070;
+      --text-faint: #adadad;
+      --accent: #0066ff;  /* Mobbin electric blue reserved strictly for commercial/featured signal */
+      --danger: #d93025;
+
+      --footer-bg: #141414;
+      --footer-text: #ffffff;
+      --footer-border: #262626;
+      
+      /* Mobbin Rounded Geometry */
+      --rounded-none: 0px;
+      --rounded-sm: 16px;
+      --rounded-md: 24px;
+      --rounded-full: 9999px;
+      
+      /* Spacing */
+      --space-xxs: 4px;
+      --space-xs: 8px;
+      --space-sm: 12px;
+      --space-md: 16px;
+      --space-lg: 24px;
+      --space-xl: 32px;
+      --space-xxl: 48px;
+      --space-section: 80px;
+
+      --tr: 0.15s ease-out;
+    }
+
+    [data-theme="dark"] {
+      /* Mobbin Dark Mode Polarity Flip */
+      --canvas: #0c0c0c;
+      --canvas-soft: #161616;
+      --field: #1e1e1e;
+      --hairline-soft: #242424;
+      --hairline: #303030;
+      
+      --primary: #f5f5f5;
+      --on-primary: #121212;
+      --ink: #f5f5f5;
+      --ink-soft: #d6d6d6;
+      --text-muted: #9e9e9e;
+      --text-faint: #666666;
+      --accent: #2979ff;  /* Vibrant electric blue in dark mode */
+      --danger: #ff5252;
+
+      --footer-bg: #070707;
+      --footer-text: #f5f5f5;
+      --footer-border: #1f1f1f;
+    }
+
+    /* Dark Mode Component Polishes */
+    [data-theme="dark"] .brand-icon {
+      border-color: #333333;
+    }
+
+    [data-theme="dark"] .btn-download-guide .sub-label {
+      color: #555555;
+    }
+
+    [data-theme="dark"] .modal-nav {
+      background-color: rgba(36, 36, 36, 0.88);
+      color: var(--ink);
+    }
+
+    [data-theme="dark"] .modal-nav:hover {
+      background-color: #383838;
+    }
+
+    /* Theme Toggle Button */
+    .theme-toggle-btn {
+      background-color: var(--field);
+      color: var(--ink);
+      border: 1px solid var(--hairline-soft);
+      border-radius: var(--rounded-full);
+      width: 36px;
+      height: 36px;
+      padding: 0;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: background-color var(--tr), transform var(--tr), border-color var(--tr);
+      flex-shrink: 0;
+    }
+
+    .theme-toggle-btn:hover {
+      background-color: var(--hairline);
+      transform: scale(1.05);
+    }
+
+    .theme-icon-sun {
+      display: none;
+      color: var(--ink);
+    }
+
+    .theme-icon-moon {
+      display: block;
+      color: var(--ink);
+    }
+
+    [data-theme="dark"] .theme-icon-sun {
+      display: block;
+    }
+
+    [data-theme="dark"] .theme-icon-moon {
+      display: none;
+    }
+
+    html {
+      scroll-behavior: smooth;
+      background-color: var(--canvas);
+      overflow-x: hidden;
+      width: 100%;
+    }
+    
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: var(--canvas);
+      color: var(--ink);
+      min-height: 100vh;
+      width: 100%;
+      overflow-x: hidden;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      line-height: 1.38;
+      letter-spacing: 0;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* ── Floating Navigation Stadium Pill ── */
+    .nav-wrapper {
+      position: sticky;
+      top: 16px;
+      width: 100%;
+      max-width: 920px;
+      padding: 0 20px;
+      z-index: 100;
+      display: flex;
+      justify-content: center;
+    }
+
+    .nav-pill {
+      background-color: var(--canvas-soft);
+      border-radius: var(--rounded-full);
+      padding: 8px 14px 8px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      border: 1px solid var(--hairline-soft);
+    }
+
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      color: var(--ink);
+    }
+
+    /* Brand Icon Image */
+    .brand-icon {
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      display: block;
+      flex-shrink: 0;
+      border: 1px solid var(--hairline-soft);
+      transition: transform var(--tr);
+    }
+
+    .nav-brand:hover .brand-icon {
+      transform: scale(1.05);
+    }
+
+    .brand-name {
+      font-size: 17px;
+      font-weight: 650;
+      color: var(--ink);
+      letter-spacing: 0;
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .nav-link {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-muted);
+      text-decoration: none;
+      transition: color var(--tr);
+      padding: 4px 6px;
+      border-radius: var(--rounded-sm);
+    }
+
+    .nav-link:hover, .nav-link.active {
+      color: var(--ink);
+    }
+
+    .nav-center-tag {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .nav-status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background-color: var(--ink);
+    }
+
+    .nav-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* Mobbin Stadium Buttons */
+    .btn-primary {
+      background-color: var(--primary);
+      color: var(--on-primary);
+      border-radius: var(--rounded-full);
+      border: none;
+      font-size: 14px;
+      font-weight: 600;
+      padding: 10px 20px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      text-decoration: none;
+      transition: background-color var(--tr), transform var(--tr);
+      white-space: nowrap;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background-color: var(--ink-soft);
+      transform: translateY(-1px);
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .btn-outline {
+      background-color: var(--canvas);
+      color: var(--ink);
+      border: 1px solid var(--hairline);
+      border-radius: var(--rounded-full);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 8px 18px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      text-decoration: none;
+      transition: all var(--tr);
+      white-space: nowrap;
+    }
+
+    .btn-outline:hover:not(:disabled) {
+      background-color: var(--canvas-soft);
+      border-color: var(--ink);
+    }
+
+    .btn-pill-soft {
+      background-color: var(--canvas-soft);
+      color: var(--ink);
+      border-radius: var(--rounded-full);
+      border: none;
+      font-size: 12.5px;
+      font-weight: 600;
+      padding: 6px 14px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      text-decoration: none;
+      transition: all var(--tr);
+      white-space: nowrap;
+    }
+
+    .btn-pill-soft:hover {
+      background-color: var(--hairline);
+    }
+
+    /* ── Main Content Container ── */
+    .page-container {
+      width: 100%;
+      max-width: 920px;
+      padding: 40px 20px 80px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    /* ── Hero Section ── */
+    .hero {
+      text-align: center;
+      margin: 40px 0 48px;
+      max-width: 760px;
+    }
+
+    .hero-eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background-color: var(--canvas-soft);
+      border-radius: var(--rounded-full);
+      padding: 5px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--ink);
+      margin-bottom: 20px;
+    }
+
+    .hero-heading {
+      font-size: clamp(34px, 5.5vw, 56px);
+      font-weight: 650;
+      line-height: 1.05;
+      letter-spacing: 0;
+      color: var(--ink);
+      margin-bottom: 18px;
+    }
+
+    .hero-subtitle {
+      font-size: 18px;
+      font-weight: 300;
+      line-height: 1.45;
+      color: var(--text-muted);
+      max-width: 600px;
+      margin: 0 auto;
+    }
+
+    /* ── Input Card ── */
+    .input-card {
+      width: 100%;
+      background-color: var(--canvas);
+      border: 1px solid var(--hairline-soft);
+      border-radius: var(--rounded-md);
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 10px;
+      align-items: stretch;
+      background-color: var(--field);
+      border-radius: var(--rounded-full);
+      padding: 6px 6px 6px 18px;
+      transition: box-shadow var(--tr), background-color var(--tr);
+    }
+
+    .input-row:focus-within {
+      background-color: var(--canvas);
+      box-shadow: 0 0 0 2px var(--ink);
+    }
+
+    .url-input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--ink);
+      font-family: inherit;
+      font-size: 15px;
+      font-weight: 450;
+      min-width: 0;
+    }
+
+    .url-input::placeholder {
+      color: var(--text-faint);
+    }
+
+    .input-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    .input-meta-bar {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      margin-top: 10px;
+      font-size: 12px;
+      color: var(--text-muted);
+      padding: 0 4px;
+    }
+
+    /* ── Recent Job Toast ── */
+    .recent-job-toast {
+      display: none;
+      margin-top: 14px;
+      padding: 10px 16px;
+      background-color: var(--canvas-soft);
+      border-radius: var(--rounded-sm);
+      font-size: 13px;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    /* ── Pipeline Progress Card ── */
+    #progress-section {
+      display: none;
+      width: 100%;
+      background-color: var(--canvas);
+      border: 1px solid var(--hairline-soft);
+      border-radius: var(--rounded-md);
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+
+    .progress-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .progress-stage-title {
+      font-size: 15px;
+      font-weight: 650;
+      color: var(--ink);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .progress-pct {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+
+    .progress-track {
+      height: 6px;
+      background-color: var(--field);
+      border-radius: var(--rounded-full);
+      overflow: hidden;
+      margin-bottom: 12px;
+    }
+
+    .progress-fill {
+      height: 100%;
+      width: 0%;
+      background-color: var(--ink);
+      border-radius: var(--rounded-full);
+      transition: width 0.35s ease-out;
+    }
+
+    .progress-status-msg {
+      font-size: 12.5px;
+      color: var(--text-muted);
+      margin-bottom: 20px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .steps-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 4px 0 2px;
+      width: 100%;
+    }
+
+    .step-pill {
+      background-color: var(--canvas-soft);
+      border-radius: var(--rounded-full);
+      padding: 5px 12px;
+      font-size: 11.5px;
+      font-weight: 450;
+      color: var(--text-muted);
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+      transition: all var(--tr);
+      border: 1.5px solid transparent;
+      box-sizing: border-box;
+    }
+
+    .step-pill.active {
+      background-color: var(--canvas);
+      color: var(--ink);
+      font-weight: 600;
+      border-color: var(--ink);
+    }
+
+    .step-pill.done {
+      background-color: var(--ink);
+      color: var(--on-primary);
+      font-weight: 600;
+      border-color: var(--ink);
+    }
+
+    /* ── Results Hub ── */
+    #result-section {
+      display: none;
+      width: 100%;
+    }
+
+    .result-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+      padding: 0 4px;
+    }
+
+    .result-banner-title {
+      font-size: 20px;
+      font-weight: 650;
+      color: var(--ink);
+    }
+
+    /* Mobbin pricing-card-featured: Soft canvas tint (#f3f3f3) with badge-popular (#0066ff) */
+    .study-guide-card {
+      background-color: var(--canvas-soft);
+      border-radius: var(--rounded-md);
+      padding: 28px;
+      margin-bottom: 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 24px;
+    }
+
+    .guide-copy {
+      max-width: 520px;
+    }
+
+    .guide-tag-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    /* Mobbin badge-popular: electric blue pill, the only chromatic accent */
+    .badge-popular {
+      background-color: var(--accent);
+      color: var(--on-primary);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 10px;
+      border-radius: var(--rounded-full);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .guide-heading {
+      font-size: 22px;
+      font-weight: 650;
+      line-height: 1.15;
+      color: var(--ink);
+      margin-bottom: 6px;
+    }
+
+    .guide-desc {
+      font-size: 14px;
+      font-weight: 450;
+      color: var(--text-muted);
+      line-height: 1.45;
+      margin-bottom: 14px;
+    }
+
+    .guide-features {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--ink);
+    }
+
+    .btn-download-guide {
+      background-color: var(--primary);
+      color: var(--on-primary);
+      border-radius: var(--rounded-full);
+      padding: 14px 28px;
+      font-size: 14px;
+      font-weight: 600;
+      border: none;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      transition: background-color var(--tr), transform var(--tr);
+      min-width: 230px;
+      text-align: center;
+    }
+
+    .btn-download-guide:hover:not(:disabled) {
+      background-color: var(--ink-soft);
+      transform: translateY(-1px);
+    }
+
+    .btn-download-guide .sub-label {
+      font-size: 11px;
+      font-weight: 450;
+      color: var(--text-faint);
+    }
+
+    /* ── Slide Studio Card (Mobbin gallery layout) ── */
+    .slide-studio-card {
+      background-color: var(--canvas);
+      border: 1px solid var(--hairline-soft);
+      border-radius: var(--rounded-md);
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+
+    .studio-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+
+    .studio-title {
+      font-size: 18px;
+      font-weight: 650;
+      color: var(--ink);
+    }
+
+    .studio-sub {
+      font-size: 13px;
+      font-weight: 450;
+      color: var(--text-muted);
+      margin-top: 3px;
+    }
+
+    .studio-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .studio-status-strip {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background-color: var(--canvas-soft);
+      border-radius: var(--rounded-full);
+      padding: 8px 16px;
+      font-size: 12.5px;
+      color: var(--text-muted);
+      margin-bottom: 16px;
+    }
+
+    .studio-counter strong {
+      color: var(--ink);
+      font-weight: 600;
+    }
+
+    /* ── Slides Grid (Mobbin Gallery Frames) ── */
+    .slides-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+      gap: 14px;
+      max-height: 540px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    .slides-grid::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .slides-grid::-webkit-scrollbar-thumb {
+      background-color: var(--hairline);
+      border-radius: var(--rounded-full);
+    }
+
+    .slide-item {
+      background-color: var(--canvas);
+      border: 1px solid var(--hairline-soft);
+      border-radius: var(--rounded-sm);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      transition: border-color var(--tr), opacity var(--tr);
+      cursor: pointer;
+    }
+
+    .slide-item.selected {
+      border-color: var(--hairline);
+    }
+
+    .slide-item.excluded {
+      opacity: 0.35;
+      filter: grayscale(1);
+    }
+
+    .slide-header {
+      padding: 8px 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background-color: var(--canvas-soft);
+      font-size: 11px;
+    }
+
+    .slide-header-left {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .slide-header-left input[type="checkbox"] {
+      cursor: pointer;
+      accent-color: var(--ink);
+      width: 14px;
+      height: 14px;
+    }
+
+    .slide-index-label {
+      font-weight: 650;
+      color: var(--ink);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .slide-time-label {
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10.5px;
+    }
+
+    .slide-btn-icon {
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      font-size: 11.5px;
+      padding: 2px 5px;
+      border-radius: 4px;
+      color: var(--text-muted);
+      transition: color var(--tr);
+    }
+
+    .slide-btn-icon:hover {
+      color: var(--ink);
+    }
+
+    .slide-thumb {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background-color: #000000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    .slide-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .slide-footer-strip {
+      padding: 7px 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background-color: var(--canvas);
+      font-size: 11px;
+      border-top: 1px solid var(--hairline-soft);
+    }
+
+    .slide-status-text {
+      font-weight: 600;
+    }
+
+    .slide-item.selected .slide-status-text {
+      color: var(--ink);
+    }
+
+    .slide-item.excluded .slide-status-text {
+      color: var(--danger);
+    }
+
+    /* ── Lightbox Modal (Mobbin ex-modal-card) ── */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background-color: rgba(20, 20, 20, 0.65);
+      backdrop-filter: blur(8px);
+      z-index: 1000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .modal-backdrop.active {
+      display: flex;
+    }
+
+    .modal-surface {
+      background-color: var(--canvas);
+      border-radius: var(--rounded-md);
+      max-width: 960px;
+      width: 100%;
+      max-height: 90vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      box-shadow: 0 20px 48px rgba(0, 0, 0, 0.25);
+    }
+
+    .modal-top {
+      padding: 14px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background-color: var(--canvas-soft);
+      border-bottom: 1px solid var(--hairline-soft);
+    }
+
+    .modal-title {
+      font-size: 15px;
+      font-weight: 650;
+      color: var(--ink);
+    }
+
+    .modal-close {
+      background: transparent;
+      border: none;
+      font-size: 22px;
+      cursor: pointer;
+      color: var(--text-muted);
+      line-height: 1;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    .modal-close:hover {
+      color: var(--ink);
+    }
+
+    .modal-media {
+      padding: 16px;
+      background-color: #0a0a0a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 360px;
+      max-height: 68vh;
+      position: relative;
+    }
+
+    .modal-media img {
+      max-width: 100%;
+      max-height: 65vh;
+      object-fit: contain;
+      border-radius: var(--rounded-sm);
+    }
+
+    .modal-nav {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      background-color: rgba(255, 255, 255, 0.85);
+      color: var(--ink);
+      border: none;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 18px;
+      font-weight: 600;
+      transition: background-color var(--tr);
+    }
+
+    .modal-nav:hover {
+      background-color: #ffffff;
+    }
+
+    .modal-nav-prev { left: 16px; }
+    .modal-nav-next { right: 16px; }
+
+    .modal-bottom {
+      padding: 12px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background-color: var(--canvas-soft);
+      border-top: 1px solid var(--hairline-soft);
+      font-size: 13px;
+    }
+
+    /* ── Mobbin Polarity Inversion Footer ── */
+    footer {
+      width: 100%;
+      background-color: var(--footer-bg);
+      color: var(--footer-text);
+      border-top-left-radius: var(--rounded-md);
+      border-top-right-radius: var(--rounded-md);
+      border-top: 1px solid var(--footer-border);
+      padding: 48px 24px 36px;
+      margin-top: 80px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .footer-inner {
+      width: 100%;
+      max-width: 920px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 20px;
+      border-bottom: 1px solid #262626;
+      padding-bottom: 28px;
+      margin-bottom: 24px;
+    }
+
+    .footer-brand {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .footer-title {
+      font-size: 20px;
+      font-weight: 650;
+      color: #ffffff;
+    }
+
+    .footer-tagline {
+      font-size: 13px;
+      color: var(--text-faint);
+    }
+
+    .footer-nav {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .footer-nav a {
+      color: #a1a1a6;
+      font-size: 13px;
+      text-decoration: none;
+      transition: color var(--tr);
+    }
+
+    .footer-nav a:hover {
+      color: #ffffff;
+    }
+
+    .footer-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    footer .footer-btn {
+      background-color: rgba(255, 255, 255, 0.1);
+      color: #ffffff;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: var(--rounded-full);
+      font-size: 12px;
+      font-weight: 500;
+      padding: 7px 15px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: background-color var(--tr), border-color var(--tr), transform var(--tr);
+      text-decoration: none;
+    }
+
+    footer .footer-btn:hover {
+      background-color: rgba(255, 255, 255, 0.18);
+      border-color: rgba(255, 255, 255, 0.28);
+      transform: translateY(-1px);
+    }
+
+    .footer-bottom {
+      width: 100%;
+      max-width: 920px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      color: var(--text-muted);
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .reset-link-row {
+      text-align: center;
+      margin-top: 24px;
+    }
+
+    .reset-link {
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 600;
+      text-decoration: underline;
+      cursor: pointer;
+    }
+
+    /* ── SEO Value Highlights Strip (Mobbin Style) ── */
+    .seo-features-grid {
+      width: 100%;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin: 18px 0 36px;
+    }
+
+    .seo-feature-card {
+      background-color: var(--canvas-soft);
+      border: 1px solid var(--hairline-soft);
+      border-radius: var(--rounded-sm);
+      padding: 18px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      transition: border-color var(--tr);
+    }
+
+    .seo-feature-card:hover {
+      border-color: var(--hairline);
+    }
+
+    .seo-feature-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .seo-feature-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background-color: var(--field);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
+      flex-shrink: 0;
+      border: 1px solid var(--hairline-soft);
+    }
+
+    .seo-feature-title {
+      font-size: 14.5px;
+      font-weight: 650;
+      color: var(--ink);
+      letter-spacing: -0.01em;
+    }
+
+    .seo-feature-desc {
+      font-size: 12.5px;
+      color: var(--text-muted);
+      line-height: 1.45;
+    }
+
+    /* ── SEO FAQ Section (Native HTML details/summary styled like Mobbin) ── */
+    .faq-section {
+      width: 100%;
+      margin: 56px 0 20px;
+    }
+
+    .faq-header {
+      text-align: center;
+      margin-bottom: 28px;
+    }
+
+    .faq-eyebrow {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 8px;
+    }
+
+    .faq-title {
+      font-size: 24px;
+      font-weight: 650;
+      color: var(--ink);
+      letter-spacing: -0.02em;
+    }
+
+    .faq-subtitle {
+      font-size: 14px;
+      color: var(--text-muted);
+      margin-top: 6px;
+    }
+
+    .faq-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .faq-item {
+      background-color: var(--canvas);
+      border: 1px solid var(--hairline-soft);
+      border-radius: var(--rounded-sm);
+      overflow: hidden;
+      transition: border-color var(--tr), background-color var(--tr);
+    }
+
+    .faq-item[open] {
+      border-color: var(--hairline);
+      background-color: var(--canvas-soft);
+    }
+
+    .faq-question {
+      padding: 16px 20px;
+      font-size: 14.5px;
+      font-weight: 600;
+      color: var(--ink);
+      cursor: pointer;
+      list-style: none;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      user-select: none;
+    }
+
+    .faq-question::-webkit-details-marker {
+      display: none;
+    }
+
+    .faq-chevron {
+      width: 18px;
+      height: 18px;
+      color: var(--text-muted);
+      transition: transform var(--tr);
+      flex-shrink: 0;
+    }
+
+    .faq-item[open] .faq-chevron {
+      transform: rotate(180deg);
+      color: var(--ink);
+    }
+
+    .faq-answer {
+      padding: 0 20px 18px;
+      font-size: 13.5px;
+      color: var(--text-muted);
+      line-height: 1.55;
+    }
+
+    .faq-answer strong {
+      color: var(--ink);
+    }
+
+    /* Screen Reader Utility */
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    /* ── Responsive Mobile & Tablet Layout (Mobbin System) ── */
+    @media (max-width: 768px) {
+      /* Navigation Pill */
+      .nav-wrapper {
+        top: 8px;
+        padding: 0 10px;
+      }
+      
+      .nav-pill {
+        padding: 6px 8px 6px 12px;
+        gap: 6px;
+      }
+      
+      .nav-center-tag {
+        display: none !important;
+      }
+
+      .nav-links {
+        display: none !important;
+      }
+      
+      .nav-actions .btn-pill-soft {
+        display: none !important;
+      }
+
+      .nav-actions .btn-primary {
+        padding: 6px 14px;
+        font-size: 12.5px;
+        min-height: 34px;
+      }
+
+      .theme-toggle-btn {
+        width: 32px;
+        height: 32px;
+      }
+      
+      .brand-name {
+        font-size: 15px;
+      }
+
+      .brand-icon {
+        width: 26px;
+        height: 26px;
+      }
+      
+      /* Main Page Container */
+      .page-container {
+        padding: 18px 12px 50px;
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
+      }
+      
+      /* Hero Section */
+      .hero {
+        margin: 14px 0 24px;
+        width: 100%;
+        max-width: 100%;
+      }
+
+      .hero-eyebrow {
+        font-size: 11px;
+        padding: 4px 10px;
+        margin-bottom: 12px;
+      }
+      
+      .hero-heading {
+        font-size: clamp(22px, 6.2vw, 30px);
+        line-height: 1.15;
+        margin-bottom: 10px;
+        word-wrap: break-word;
+        overflow-wrap: break-word;
+      }
+      
+      .hero-subtitle {
+        font-size: 14px;
+        line-height: 1.42;
+        margin-bottom: 16px;
+        word-wrap: break-word;
+      }
+      
+      .hero-chips {
+        gap: 5px;
+      }
+      
+      .hero-chip {
+        font-size: 11px;
+        padding: 4px 9px;
+      }
+      
+      /* Main Input Card */
+      .input-card {
+        padding: 12px;
+        border-radius: var(--rounded-md);
+        margin-bottom: 16px;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      
+      .input-row {
+        display: flex;
+        flex-direction: column;
+        border-radius: var(--rounded-md);
+        padding: 10px 10px 8px;
+        gap: 8px;
+        background-color: var(--field);
+        width: 100%;
+        box-sizing: border-box;
+      }
+      
+      .url-input {
+        width: 100%;
+        font-size: 13.5px;
+        padding: 4px 2px;
+      }
+      
+      .input-actions {
+        width: 100%;
+        display: flex;
+        gap: 6px;
+      }
+      
+      .input-actions .btn-outline {
+        flex: 0 0 auto;
+        padding: 8px 14px;
+        font-size: 12.5px;
+        min-height: 38px;
+        justify-content: center;
+      }
+      
+      .input-actions .btn-primary {
+        flex: 1;
+        justify-content: center;
+        padding: 8px 14px;
+        font-size: 12.5px;
+        min-height: 38px;
+      }
+      
+      .input-meta-bar {
+        display: none !important;
+      }
+
+      /* Recent Job Toast */
+      .recent-job-toast {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+        padding: 10px 12px;
+      }
+
+      .recent-job-toast > div:last-child {
+        width: 100%;
+        display: flex;
+        justify-content: space-between;
+      }
+
+      /* Progress Bar Section on Mobile */
+      #progress-section {
+        padding: 14px 12px;
+      }
+
+      .progress-stage-title {
+        font-size: 13.5px;
+      }
+
+      .steps-row {
+        gap: 6px;
+        padding: 4px 0 2px;
+        flex-wrap: wrap;
+      }
+
+      .step-pill {
+        font-size: 11px;
+        padding: 4px 10px;
+        border: 1.5px solid transparent;
+      }
+      
+      /* Deliverable 1: AI Study Guide Card */
+      .study-guide-card {
+        padding: 16px 12px;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 14px;
+        border-radius: var(--rounded-md);
+      }
+      
+      .guide-copy {
+        width: 100%;
+      }
+      
+      .guide-heading {
+        font-size: 18px;
+        word-wrap: break-word;
+      }
+      
+      .guide-desc {
+        font-size: 12.5px;
+        margin-bottom: 10px;
+        word-wrap: break-word;
+      }
+      
+      .guide-features {
+        font-size: 11px;
+        gap: 6px 10px;
+      }
+      
+      .btn-download-guide {
+        width: 100%;
+        min-width: unset;
+        padding: 11px 14px;
+        border-radius: var(--rounded-full);
+        font-size: 13px;
+      }
+
+      .btn-download-guide .sub-label {
+        font-size: 10px;
+      }
+      
+      /* Deliverable 2: Slide Studio Card */
+      .slide-studio-card {
+        padding: 14px 10px;
+        border-radius: var(--rounded-md);
+      }
+      
+      .studio-top {
+        flex-direction: column;
+        gap: 10px;
+        align-items: stretch;
+      }
+
+      .studio-title {
+        font-size: 16.5px;
+      }
+
+      .studio-sub {
+        font-size: 12px;
+      }
+      
+      .studio-toolbar {
+        width: 100%;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+      }
+      
+      .studio-toolbar .btn-outline {
+        padding: 8px 6px;
+        font-size: 11.5px;
+        justify-content: center;
+        min-height: 36px;
+      }
+      
+      .studio-toolbar .btn-primary {
+        grid-column: span 2;
+        padding: 9px 12px;
+        font-size: 12px;
+        justify-content: center;
+        min-height: 38px;
+      }
+      
+      .studio-status-strip {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+        border-radius: var(--rounded-sm);
+        padding: 8px 10px;
+        font-size: 11px;
+      }
+      
+      .slides-grid {
+        grid-template-columns: 1fr;
+        gap: 10px;
+        max-height: 460px;
+        padding-right: 0;
+      }
+
+      .slide-thumb {
+        width: 100%;
+        height: auto;
+        aspect-ratio: 16 / 9;
+      }
+      
+      .slide-btn-icon {
+        padding: 6px 8px;
+        font-size: 13.5px;
+        min-height: 28px;
+        min-width: 28px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .slide-header-left input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+      }
+      
+      /* Lightbox Modal */
+      .modal-backdrop {
+        padding: 6px;
+      }
+      
+      .modal-surface {
+        border-radius: var(--rounded-sm);
+        max-height: 96vh;
+      }
+      
+      .modal-media {
+        min-height: 160px;
+        max-height: 48vh;
+        padding: 6px;
+      }
+
+      .modal-nav {
+        width: 32px;
+        height: 32px;
+        font-size: 15px;
+      }
+      
+      .modal-bottom {
+        padding: 8px 12px;
+        flex-direction: column;
+        gap: 6px;
+        align-items: stretch;
+      }
+      
+      .modal-bottom .btn-outline {
+        width: 100%;
+        justify-content: center;
+        min-height: 38px;
+      }
+
+      /* SEO Feature Cards Mobile */
+      .seo-features-grid {
+        grid-template-columns: 1fr;
+        gap: 8px;
+        margin: 16px 0 24px;
+      }
+
+      .seo-feature-card {
+        padding: 14px 14px;
+      }
+
+      /* FAQ Mobile */
+      .faq-section {
+        margin: 36px 0 16px;
+      }
+
+      .faq-title {
+        font-size: 20px;
+      }
+
+      .faq-question {
+        padding: 14px 16px;
+        font-size: 13.5px;
+      }
+
+      .faq-answer {
+        padding: 0 16px 14px;
+        font-size: 12.5px;
+      }
+
+      /* Footer */
+      footer {
+        padding: 32px 16px 24px;
+        margin-top: 40px;
+        border-top-left-radius: var(--rounded-sm);
+        border-top-right-radius: var(--rounded-sm);
+      }
+      
+      .footer-inner {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 16px;
+        padding-bottom: 20px;
+        margin-bottom: 16px;
+      }
+      
+      .footer-bottom {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+        font-size: 11px;
+      }
+    }
+
+    @media (min-width: 769px) and (max-width: 1024px) {
+      .slides-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Floating Stadium Navigation Pill -->
+  <div class="nav-wrapper">
+    <nav class="nav-pill">
+      <a href="/" class="nav-brand" onclick="resetForm(); return false;" title="YT2PDFS — YouTube to PDF Converter" aria-label="YT2PDFS Homepage">
+        <img src="/brand-icon.png" class="brand-icon" alt="YT2PDFS Logo" width="30" height="30" />
+        <span class="brand-name">YT2PDFS</span>
+      </a>
+      <div class="nav-links">
+        <a href="/about" class="nav-link">About</a>
+        <a href="/contact" class="nav-link">Contact</a>
+        <a href="/privacy" class="nav-link">Privacy</a>
+        <a href="/terms" class="nav-link">Terms</a>
+      </div>
+      <div class="nav-center-tag">
+        <span class="nav-status-dot"></span>
+        <span>AI Engine Ready</span>
+      </div>
+      <div class="nav-actions">
+        <button class="theme-toggle-btn" id="theme-toggle" type="button" onclick="toggleTheme()" title="Switch dark/light theme" aria-label="Switch dark/light theme">
+          <svg class="theme-icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="5"></circle>
+            <line x1="12" y1="1" x2="12" y2="3"></line>
+            <line x1="12" y1="21" x2="12" y2="23"></line>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+            <line x1="1" y1="12" x2="3" y2="12"></line>
+            <line x1="21" y1="12" x2="23" y2="12"></line>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+          </svg>
+          <svg class="theme-icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+          </svg>
+        </button>
+        <button class="btn-primary" type="button" onclick="document.getElementById('url-input').focus()">Extract</button>
+      </div>
+    </nav>
+  </div>
+
+  <div class="page-container">
+
+    <!-- Hero Section -->
+    <header class="hero">
+      <div class="hero-eyebrow">
+        <span>●</span> Free YouTube to PDF Converter Online
+      </div>
+      <h1 class="hero-heading">YouTube to PDF Converter — Free Video to PDF & AI Notes</h1>
+      <p class="hero-subtitle">
+        Convert YouTube video to PDF online free with YT2PDFS (YT to PDF). Fast, automated video to PDF converter that extracts pure presentation slides and generates comprehensive AI lecture notes from any YouTube link.
+      </p>
+    </header>
+
+    <!-- Main Input Card -->
+    <div class="input-card" id="main-card">
+      <div class="input-row">
+        <label for="url-input" class="sr-only">Enter YouTube video link to convert to PDF</label>
+        <input 
+          type="url" 
+          class="url-input" 
+          id="url-input"
+          placeholder="Paste any YouTube video link (e.g. https://www.youtube.com/watch?v=...)"
+          autocomplete="off" 
+          spellcheck="false" 
+          aria-label="YouTube video URL"
+        />
+        <div class="input-actions">
+          <button class="btn-outline" type="button" onclick="pasteClipboard()" aria-label="Paste YouTube link from clipboard">
+            Paste
+          </button>
+          <button class="btn-primary" id="submit-btn" onclick="startJob()" aria-label="Convert YouTube video to PDF">
+            <span id="btn-text">Convert to PDF</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="input-meta-bar">
+        <div class="enter-hint">Press Enter ↵ to convert</div>
+      </div>
+
+      <!-- Recent Job Notification -->
+      <div class="recent-job-toast" id="recent-job-banner">
+        <div>
+          <span>Previous job <strong id="recent-job-id"></strong> is ready.</span>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;">
+          <a href="#" onclick="viewRecentJob();return false;" class="btn-pill-soft" style="text-decoration:none;">View PDFs ↗</a>
+          <a href="#" onclick="dismissRecentJob();return false;" style="color:var(--text-muted);text-decoration:none;font-size:14px;" title="Dismiss">✕</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- SEO Value Highlights Strip -->
+    <section class="seo-features-grid" aria-label="Key Features">
+      <article class="seo-feature-card">
+        <div class="seo-feature-header">
+          <div class="seo-feature-icon" aria-hidden="true">📑</div>
+          <h2 class="seo-feature-title">YouTube Video to PDF Converter</h2>
+        </div>
+        <p class="seo-feature-desc">
+          Convert YouTube video to PDF files with clear presentation slides, eliminating webcam frames and duplicate transitions.
+        </p>
+      </article>
+
+      <article class="seo-feature-card">
+        <div class="seo-feature-header">
+          <div class="seo-feature-icon" aria-hidden="true">✨</div>
+          <h2 class="seo-feature-title">YouTube to PDF Notes AI</h2>
+        </div>
+        <p class="seo-feature-desc">
+          AI YouTube to PDF notes generator synthesizes full textbook chapters with LaTeX formulas, derivations, diagrams, and problem sets.
+        </p>
+      </article>
+
+      <article class="seo-feature-card">
+        <div class="seo-feature-header">
+          <div class="seo-feature-icon" aria-hidden="true">⚡</div>
+          <h2 class="seo-feature-title">Convert YouTube to PDF Online Free</h2>
+        </div>
+        <p class="seo-feature-desc">
+          Fast, automated video to PDF converter online. No software installation, watermark, or account needed for your YouTube to PDF download.
+        </p>
+      </article>
+    </section>
+
+    <!-- Progress Card -->
+    <div id="progress-section">
+      <div class="progress-top">
+        <div class="progress-stage-title">
+          <span style="font-size:12px;">●</span>
+          <span id="stage-label">Processing lecture...</span>
+        </div>
+        <span class="progress-pct" id="pct-label">0%</span>
+      </div>
+
+      <div class="progress-track">
+        <div class="progress-fill" id="progress-fill"></div>
+      </div>
+
+      <div class="progress-status-msg" id="progress-msg">Preparing video...</div>
+
+      <div class="steps-row">
+        <span class="step-pill" id="step-fetch">1. Fetch</span>
+        <span class="step-pill" id="step-dl">2. Download</span>
+        <span class="step-pill" id="step-cv">3. Scan Slides</span>
+        <span class="step-pill" id="step-ai">4. Filter</span>
+        <span class="step-pill" id="step-slides">5. Slides</span>
+        <span class="step-pill" id="step-transcript">6. Transcript</span>
+        <span class="step-pill" id="step-guide">7. Study Guide</span>
+      </div>
+    </div>
+
+    <!-- Results Section -->
+    <div id="result-section">
+      <div class="result-banner">
+        <div class="result-banner-title">Lecture materials ready.</div>
+      </div>
+
+      <!-- Deliverable 1: AI Comprehensive Study Guide -->
+      <div class="study-guide-card">
+        <div class="guide-copy">
+          <div class="guide-tag-row">
+            <span class="badge-popular">Basic → Advanced</span>
+            <span style="font-size:12px;font-weight:600;color:var(--ink);">Academic Chapter</span>
+          </div>
+          <h2 class="guide-heading">Comprehensive Study Guide</h2>
+          <p class="guide-desc">
+            Complete academic textbook chapter with full mathematical derivations, LaTeX formulas, problem sets, and key lecture diagrams.
+          </p>
+          <div class="guide-features">
+            <span>✓ 6 Chapters</span>
+            <span>✓ Slide Formulas</span>
+            <span>✓ Solved Problems</span>
+            <span>✓ Formula Sheet</span>
+          </div>
+        </div>
+        <button class="btn-download-guide" id="dl-guide-btn" onclick="downloadGuide()">
+          <span>Download Study Guide</span>
+          <span class="sub-label">Full Academic Chapter (PDF)</span>
+        </button>
+      </div>
+
+      <!-- Deliverable 2: Slide Studio (Preview & Curation) -->
+      <div class="slide-studio-card">
+        <div class="studio-top">
+          <div>
+            <h3 class="studio-title">Slide Deck Studio</h3>
+            <p class="studio-sub">
+              Review extracted slides below. Deselect or delete any duplicate or transition frames before compiling.
+            </p>
+          </div>
+          <div class="studio-toolbar">
+            <button class="btn-outline" type="button" onclick="toggleAllSlides(true)">Select all</button>
+            <button class="btn-outline" type="button" onclick="toggleAllSlides(false)">Deselect all</button>
+            <button class="btn-primary" id="rebuild-btn" type="button" onclick="rebuildSlides()">
+              <span id="rebuild-text">Compile slides PDF</span>
+            </button>
+            <button class="btn-primary" id="dl-slides-btn" type="button" onclick="downloadSlides()" style="display:none;background-color:#000000;">
+              <span>Download Slides PDF</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="studio-status-strip">
+          <div class="studio-counter">
+            Selected <strong id="curation-selected-count">0</strong> of <span id="curation-total-count">0</span> slides
+            <span style="margin-left:8px;font-size:11.5px;color:var(--text-muted);">(Click card to toggle • 🔍 to zoom • 🗑️ to delete)</span>
+          </div>
+          <span id="curation-msg" style="color:var(--ink);font-weight:600;display:none;">✓ Slides PDF updated!</span>
+        </div>
+
+        <div id="slides-grid-container" class="slides-grid">
+          <!-- Slide cards injected dynamically -->
+        </div>
+      </div>
+
+      <div class="reset-link-row">
+        <a class="reset-link" href="#" onclick="resetForm(); return false;">Process another lecture video</a>
+      </div>
+    </div>
+
+    <!-- Error Section -->
+    <div id="error-section" style="display:none;width:100%;margin-bottom:24px;">
+      <div class="input-card" style="background-color:var(--canvas-soft);">
+        <div style="font-size:15px;font-weight:650;color:var(--danger);margin-bottom:6px;">Processing Failed</div>
+        <p class="error-msg" id="error-msg" style="font-size:13px;color:var(--ink-soft);margin-bottom:14px;">An unknown error occurred.</p>
+        <button class="btn-outline" onclick="resetForm()">Try Again</button>
+      </div>
+    </div>
+
+    <!-- SEO FAQ Section -->
+    <section class="faq-section" id="faq" aria-label="Frequently Asked Questions">
+      <div class="faq-header">
+        <div class="faq-eyebrow">Frequently Asked Questions</div>
+        <h2 class="faq-title">YouTube to PDF Converter FAQs</h2>
+        <p class="faq-subtitle">Everything you need to know about converting YouTube videos to PDF slides and AI study notes.</p>
+      </div>
+
+      <div class="faq-list">
+        <details class="faq-item">
+          <summary class="faq-question">
+            <span>Can I convert a YouTube video to PDF?</span>
+            <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </summary>
+          <div class="faq-answer">
+            Yes, you can easily <strong>convert a YouTube video to PDF</strong> using <strong>YT2PDFS</strong>. Simply paste the YouTube video link into the converter and click <strong>Convert to PDF</strong>. The tool automatically detects slide transitions, removes speaker webcams and duplicate animations, and compiles high-resolution presentation slides into a clean, downloadable PDF file.
+          </div>
+        </details>
+
+        <details class="faq-item">
+          <summary class="faq-question">
+            <span>Is there a free version of the YouTube video to PDF tool?</span>
+            <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </summary>
+          <div class="faq-answer">
+            Yes! <strong>YT2PDFS</strong> is 100% free to use online. There are no subscriptions, no credit card requirements, no hidden fees, and no watermarks on your generated PDFs. You can convert unlimited YouTube videos to PDF slide decks and AI study notes for free.
+          </div>
+        </details>
+
+        <details class="faq-item">
+          <summary class="faq-question">
+            <span>Does it work as a YouTube video to PDF converter?</span>
+            <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </summary>
+          <div class="faq-answer">
+            Yes, <strong>YT2PDFS</strong> functions as a dedicated, automated <strong>YouTube video to PDF converter</strong>. It analyzes video streams frame-by-frame using computer vision algorithms, filters out motion blur, presenter overlays, and transitional animations, and outputs publication-quality PDF slide documents along with structured lecture notes.
+          </div>
+        </details>
+
+        <details class="faq-item">
+          <summary class="faq-question">
+            <span>What is the optimal video length for best YouTube to PDF notes conversion?</span>
+            <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </summary>
+          <div class="faq-answer">
+            YT2PDFS is optimized to handle YouTube videos of any duration, from quick 5-minute tutorials to in-depth 2-to-3 hour academic lectures and conference keynotes. For the fastest conversion speed and most concise AI notes, videos between <strong>10 to 60 minutes</strong> are ideal. Multi-hour lectures are automatically batched to ensure maximum slide clarity and note depth.
+          </div>
+        </details>
+
+        <details class="faq-item">
+          <summary class="faq-question">
+            <span>How accurate are the videos to pdf notes?</span>
+            <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </summary>
+          <div class="faq-answer">
+            The notes generated by YT2PDFS are exceptionally accurate. Our system pairs multimodal AI with computer vision OCR and speech transcript alignment. It captures complex mathematical proofs, KaTeX LaTeX formulas, code snippets, terminology, and visual diagrams directly from the slides and audio lecture, providing comprehensive, university-grade study guides.
+          </div>
+        </details>
+
+        <details class="faq-item">
+          <summary class="faq-question">
+            <span>Is video to PDF conversion safe?</span>
+            <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </summary>
+          <div class="faq-answer">
+            Yes, video to PDF conversion with YT2PDFS is completely safe and secure. All processing occurs through encrypted HTTPS connections. We do not store your private credentials, we never inject malware or third-party ads, and extracted slides and generated PDF files are securely delivered directly to your browser for download.
+          </div>
+        </details>
+
+        <details class="faq-item">
+          <summary class="faq-question">
+            <span>how to convert youtube video to pdf</span>
+            <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </summary>
+          <div class="faq-answer">
+            Converting a YouTube video to PDF takes 3 simple steps:
+            <ol style="margin: 8px 0 0 20px; line-height: 1.6;">
+              <li><strong>Copy the YouTube Link:</strong> Copy the URL of the YouTube video from your browser address bar or share menu.</li>
+              <li><strong>Paste and Convert:</strong> Paste the link into the YT2PDFS search box and click <strong>Convert to PDF</strong>.</li>
+              <li><strong>Preview &amp; Download:</strong> Review your extracted slides in the interactive Slide Deck Studio, remove unwanted pages, and click <strong>Download PDF</strong> to save your file.</li>
+            </ol>
+          </div>
+        </details>
+
+        <details class="faq-item">
+          <summary class="faq-question">
+            <span>how to delete page/slides in pdf file youtube</span>
+            <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </summary>
+          <div class="faq-answer">
+            To delete or exclude unwanted pages before downloading your PDF:
+            <ol style="margin: 8px 0 0 20px; line-height: 1.6;">
+              <li>After processing, navigate to the <strong>Interactive Slide Deck Studio</strong> preview section.</li>
+              <li>Each slide card has a <strong>Delete (✕)</strong> button and selection checkbox—click delete or uncheck any duplicate, blurry, or animation-step slides.</li>
+              <li>Click <strong>Compile &amp; Download PDF</strong> to generate and download a clean PDF containing only your selected slides.</li>
+            </ol>
+          </div>
+        </details>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- Clean Mobbin Footer -->
+  <footer>
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <img src="/brand-icon.png" class="brand-icon" alt="YT2PDFS Logo" width="28" height="28" style="border-color:#333333;" />
+          <div class="footer-title">YT2PDFS</div>
+        </div>
+        <div class="footer-tagline">Free online YouTube to PDF converter and AI lecture notes generator.</div>
+      </div>
+      <div class="footer-nav">
+        <a href="/about">About Us</a>
+        <a href="/contact">Contact Us</a>
+        <a href="/privacy">Privacy Policy</a>
+        <a href="/terms">Terms &amp; Conditions</a>
+        <a href="#faq">FAQs</a>
+      </div>
+      <div class="footer-actions">
+        <button class="footer-btn" type="button" onclick="window.scrollTo({top:0, behavior:'smooth'})">Back to top ↑</button>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© 2026 YT2PDFS. Convert YouTube to PDF Online Free.</span>
+      <span>Fast Video to PDF Converter &amp; AI Lecture Notes</span>
+    </div>
+  </footer>
+
+  <!-- Lightbox Modal (Mobbin ex-modal-card) -->
+  <div class="modal-backdrop" id="slide-modal" onclick="closeSlideModal(event)">
+    <div class="modal-surface" onclick="event.stopPropagation()">
+      <div class="modal-top">
+        <div class="modal-title" id="modal-slide-title">Slide Preview</div>
+        <button class="modal-close" onclick="closeSlideModal()" title="Close (Esc)">&times;</button>
+      </div>
+      <div class="modal-media">
+        <button class="modal-nav modal-nav-prev" onclick="navigateModal(-1); event.stopPropagation();" title="Previous (←)">‹</button>
+        <img id="modal-slide-img" src="" alt="Slide Preview" />
+        <button class="modal-nav-next modal-nav" onclick="navigateModal(1); event.stopPropagation();" title="Next (→)">›</button>
+      </div>
+      <div class="modal-bottom">
+        <span id="modal-slide-meta" style="color:var(--text-muted);">Slide 1 of 1</span>
+        <button class="btn-outline" id="modal-toggle-btn" onclick="toggleCurrentModalSlide()">Toggle Slide</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+  let jobId = null, pollTimer = null;
+  let allJobSlides = [];
+  let selectedSlideSet = new Set();
+  let modalCurrentFilename = null;
+
+  const STAGE_MAP = {
+    queued:               { step: null,             label: "Queued..." },
+    fetching:             { step: "step-fetch",     label: "Fetching lecture info..." },
+    downloading:          { step: "step-dl",        label: "Downloading video..." },
+    cv_scanning:          { step: "step-cv",        label: "Scanning presentation slides..." },
+    ai_verifying:         { step: "step-ai",        label: "Filtering clean slides..." },
+    building_pdf:         { step: "step-slides",    label: "Compiling slide deck..." },
+    fetching_transcript:  { step: "step-transcript",label: "Processing speech transcript..." },
+    generating_guide:     { step: "step-guide",     label: "Generating academic study guide..." },
+    completed:            { step: "step-guide",     label: "Ready!" },
+    failed:               { step: null,             label: "Processing failed" },
+  };
+
+  const STEP_ORDER = ["step-fetch","step-dl","step-cv","step-ai","step-slides","step-transcript","step-guide"];
+
+  async function pasteClipboard() {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text && text.startsWith("http")) {
+        document.getElementById("url-input").value = text.trim();
+        document.getElementById("url-input").focus();
+      } else {
+        alert("Clipboard does not contain a valid URL.");
+      }
+    } catch (e) {
+      document.getElementById("url-input").focus();
+    }
+  }
+
+  async function startJob() {
+    const url = document.getElementById("url-input").value.trim();
+    if (!url) {
+      document.getElementById("url-input").style.boxShadow = "0 0 0 2px var(--danger)";
+      setTimeout(() => document.getElementById("url-input").style.boxShadow = "", 1500);
+      return;
+    }
+    document.getElementById("submit-btn").disabled = true;
+    document.getElementById("url-input").disabled = true;
+    document.getElementById("btn-text").textContent = "Processing...";
+
+    try {
+      const res = await fetch("/api/process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ video_url: url }),
+      });
+      const contentType = res.headers.get("content-type") || "";
+      let data = {};
+      if (contentType.includes("application/json")) {
+        data = await res.json();
+      } else {
+        data = { detail: "Backend conversion service is currently offline or unreachable." };
+      }
+      if (!res.ok) { showError(data.detail || "Server error."); return; }
+      jobId = data.job_id;
+      localStorage.setItem("yt2pdf_last_job", jobId);
+      const banner = document.getElementById("recent-job-banner");
+      if (banner) banner.style.display = "none";
+      showProgress();
+      pollTimer = setInterval(pollStatus, 2000);
+    } catch(err) {
+      showError("Could not reach the server: " + err.message);
+    }
+  }
+
+  async function pollStatus() {
+    if (!jobId) return;
+    try {
+      const res = await fetch(`/api/status/${jobId}`);
+      if (!res.ok) return;
+      const contentType = res.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) return;
+      const data = await res.json();
+      updateProgress(data);
+      if (data.stage === "completed") {
+        clearInterval(pollTimer);
+        const out = await fetch(`/api/outputs/${jobId}`).then(r => r.json()).catch(() => ({ slides_pdf: true, study_guide_pdf: true }));
+        showResult(data, out);
+      } else if (data.stage === "failed") {
+        clearInterval(pollTimer);
+        showError(data.error || "Processing failed. Please try again.");
+      }
+    } catch(err) { console.warn("Poll error:", err); }
+  }
+
+  function downloadSlides() { if (jobId) window.location.href = `/api/download/${jobId}`; }
+  function downloadGuide()  { if (jobId) window.location.href = `/api/download/${jobId}/guide`; }
+
+  function showProgress() {
+    document.getElementById("progress-section").style.display = "block";
+    document.getElementById("result-section").style.display = "none";
+    document.getElementById("error-section").style.display = "none";
+  }
+
+  function updateProgress(data) {
+    const info = STAGE_MAP[data.stage] || { step: null, label: data.stage };
+    document.getElementById("stage-label").textContent = info.label;
+    document.getElementById("pct-label").textContent = data.progress + "%";
+    document.getElementById("progress-fill").style.width = data.progress + "%";
+    document.getElementById("progress-msg").textContent = data.message || "";
+    const activeIdx = STEP_ORDER.indexOf(info.step);
+    STEP_ORDER.forEach((sid, i) => {
+      const el = document.getElementById(sid);
+      el.classList.remove("active","done");
+      if (i < activeIdx) el.classList.add("done");
+      else if (i === activeIdx) el.classList.add("active");
+    });
+  }
+
+  async function loadSlidePreview(jid) {
+    if (!jid) return;
+    try {
+      const res = await fetch(`/api/slides/${jid}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      allJobSlides = data.slides || [];
+      selectedSlideSet = new Set(allJobSlides.map(s => s.filename));
+      renderSlideCards();
+      updateCurationCounts();
+    } catch(err) {
+      console.warn("Failed to load slide preview:", err);
+    }
+  }
+
+  function updateCurationCounts() {
+    const total = allJobSlides.length;
+    const selected = selectedSlideSet.size;
+    document.getElementById("curation-total-count").textContent = total;
+    document.getElementById("curation-selected-count").textContent = selected;
+    const rebuildBtn = document.getElementById("rebuild-btn");
+    const rebuildText = document.getElementById("rebuild-text");
+    if (selected === 0) {
+      rebuildBtn.disabled = true;
+      rebuildText.textContent = "Select at least 1 slide";
+    } else {
+      rebuildBtn.disabled = false;
+      rebuildText.textContent = `Compile slides PDF (${selected})`;
+    }
+  }
+
+  function renderSlideCards() {
+    const container = document.getElementById("slides-grid-container");
+    container.innerHTML = "";
+    allJobSlides.forEach(slide => {
+      const isSelected = selectedSlideSet.has(slide.filename);
+      const card = document.createElement("div");
+      card.className = `slide-item ${isSelected ? "selected" : "excluded"}`;
+      card.id = `card-${slide.filename.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+
+      card.innerHTML = `
+        <div class="slide-header">
+          <label class="slide-header-left" onclick="event.stopPropagation()">
+            <input type="checkbox" ${isSelected ? "checked" : ""} onchange="toggleSlide('${slide.filename}')" />
+            <span class="slide-index-label">#${slide.index}</span>
+          </label>
+          <span class="slide-time-label">${slide.timestamp_str}</span>
+          <div>
+            <button class="slide-btn-icon" title="View full (Space)" onclick="openSlideModal('${slide.filename}'); event.stopPropagation();">🔍</button>
+            <button class="slide-btn-icon" title="Delete / Exclude" onclick="removeSlide('${slide.filename}', event)">🗑️</button>
+          </div>
+        </div>
+        <div class="slide-thumb" onclick="toggleSlide('${slide.filename}')">
+          <img src="${slide.image_url}" loading="lazy" alt="Slide ${slide.index}" />
+        </div>
+        <div class="slide-footer-strip" onclick="toggleSlide('${slide.filename}')">
+          <span class="slide-status-text">
+            ${isSelected ? 'Included' : 'Excluded'}
+          </span>
+          <span style="color:var(--text-muted);font-size:10.5px;">${isSelected ? 'In PDF' : 'Skipped'}</span>
+        </div>
+      `;
+      container.appendChild(card);
+    });
+  }
+
+  function toggleSlide(filename) {
+    if (selectedSlideSet.has(filename)) {
+      selectedSlideSet.delete(filename);
+    } else {
+      selectedSlideSet.add(filename);
+    }
+    const card = document.getElementById(`card-${filename.replace(/[^a-zA-Z0-9_-]/g, "_")}`);
+    if (card) {
+      const isSelected = selectedSlideSet.has(filename);
+      card.className = `slide-item ${isSelected ? "selected" : "excluded"}`;
+      const chk = card.querySelector('input[type="checkbox"]');
+      if (chk) chk.checked = isSelected;
+      const statusText = card.querySelector('.slide-status-text');
+      if (statusText) statusText.textContent = isSelected ? 'Included' : 'Excluded';
+      const hintText = card.querySelector('.slide-footer-strip span:last-child');
+      if (hintText) hintText.textContent = isSelected ? 'In PDF' : 'Skipped';
+    }
+    updateCurationCounts();
+  }
+
+  function removeSlide(filename, evt) {
+    if (evt) evt.stopPropagation();
+    selectedSlideSet.delete(filename);
+    const card = document.getElementById(`card-${filename.replace(/[^a-zA-Z0-9_-]/g, "_")}`);
+    if (card) {
+      card.className = "slide-item excluded";
+      const chk = card.querySelector('input[type="checkbox"]');
+      if (chk) chk.checked = false;
+      const statusText = card.querySelector('.slide-status-text');
+      if (statusText) statusText.textContent = 'Excluded';
+      const hintText = card.querySelector('.slide-footer-strip span:last-child');
+      if (hintText) hintText.textContent = 'Skipped';
+    }
+    updateCurationCounts();
+  }
+
+  function toggleAllSlides(selectAll) {
+    if (selectAll) {
+      selectedSlideSet = new Set(allJobSlides.map(s => s.filename));
+    } else {
+      selectedSlideSet.clear();
+    }
+    renderSlideCards();
+    updateCurationCounts();
+  }
+
+  async function rebuildSlides() {
+    if (!jobId || selectedSlideSet.size === 0) return;
+    const btn = document.getElementById("rebuild-btn");
+    const txt = document.getElementById("rebuild-text");
+    const msg = document.getElementById("curation-msg");
+    const dlBtn = document.getElementById("dl-slides-btn");
+
+    btn.disabled = true;
+    txt.textContent = "Compiling PDF...";
+
+    try {
+      const res = await fetch(`/api/rebuild_slides_pdf/${jobId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ selected_filenames: Array.from(selectedSlideSet) }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert("Error compiling slides PDF: " + (data.detail || "Unknown error"));
+        return;
+      }
+      msg.textContent = `✓ Slides PDF compiled (${data.slide_count} slides)!`;
+      msg.style.display = "inline";
+      
+      dlBtn.style.display = "inline-flex";
+      dlBtn.innerHTML = `<span>Download Slides PDF (${data.slide_count})</span>`;
+
+      setTimeout(() => {
+        msg.style.display = "none";
+      }, 6000);
+    } catch(err) {
+      alert("Failed to reach server: " + err.message);
+    } finally {
+      btn.disabled = false;
+      updateCurationCounts();
+    }
+  }
+
+  function openSlideModal(filename) {
+    const slide = allJobSlides.find(s => s.filename === filename);
+    if (!slide) return;
+    modalCurrentFilename = filename;
+    document.getElementById("modal-slide-title").textContent = slide.title;
+    document.getElementById("modal-slide-img").src = slide.image_url;
+    document.getElementById("modal-slide-meta").textContent = `Slide ${slide.index} of ${allJobSlides.length} • Timestamp: ${slide.timestamp_str}`;
+    updateModalToggleBtn();
+    document.getElementById("slide-modal").classList.add("active");
+  }
+
+  function closeSlideModal(evt) {
+    document.getElementById("slide-modal").classList.remove("active");
+    modalCurrentFilename = null;
+  }
+
+  function navigateModal(direction) {
+    if (!modalCurrentFilename || allJobSlides.length === 0) return;
+    const currentIdx = allJobSlides.findIndex(s => s.filename === modalCurrentFilename);
+    if (currentIdx === -1) return;
+    let nextIdx = currentIdx + direction;
+    if (nextIdx < 0) nextIdx = allJobSlides.length - 1;
+    if (nextIdx >= allJobSlides.length) nextIdx = 0;
+    openSlideModal(allJobSlides[nextIdx].filename);
+  }
+
+  function updateModalToggleBtn() {
+    if (!modalCurrentFilename) return;
+    const isSelected = selectedSlideSet.has(modalCurrentFilename);
+    const btn = document.getElementById("modal-toggle-btn");
+    if (isSelected) {
+      btn.textContent = "Exclude Slide";
+      btn.style.color = "var(--danger)";
+    } else {
+      btn.textContent = "Include Slide";
+      btn.style.color = "var(--ink)";
+    }
+  }
+
+  function toggleCurrentModalSlide() {
+    if (!modalCurrentFilename) return;
+    toggleSlide(modalCurrentFilename);
+    updateModalToggleBtn();
+  }
+
+  // Keyboard navigation for modal
+  window.addEventListener("keydown", e => {
+    const modal = document.getElementById("slide-modal");
+    if (modal && modal.classList.contains("active")) {
+      if (e.key === "Escape") closeSlideModal();
+      else if (e.key === "ArrowLeft") navigateModal(-1);
+      else if (e.key === "ArrowRight") navigateModal(1);
+      else if (e.key === " ") { e.preventDefault(); toggleCurrentModalSlide(); }
+    }
+  });
+
+  function showResult(data, outputs) {
+    document.getElementById("result-section").style.display = "block";
+    document.getElementById("progress-section").style.display = "none";
+    document.getElementById("error-section").style.display = "none";
+
+    const guideBtn = document.getElementById("dl-guide-btn");
+    if (outputs && outputs.study_guide_pdf) {
+      guideBtn.disabled = false;
+      guideBtn.style.opacity = "1";
+      guideBtn.style.cursor = "pointer";
+    } else {
+      guideBtn.disabled = true;
+      guideBtn.style.opacity = "0.35";
+      guideBtn.style.cursor = "not-allowed";
+    }
+
+    loadSlidePreview(jobId);
+
+    STEP_ORDER.forEach(id => {
+      document.getElementById(id).classList.remove("active");
+      document.getElementById(id).classList.add("done");
+    });
+  }
+
+  function showError(msg) {
+    document.getElementById("error-section").style.display = "block";
+    document.getElementById("progress-section").style.display = "none";
+    document.getElementById("result-section").style.display = "none";
+    document.getElementById("error-msg").textContent = msg;
+    document.getElementById("submit-btn").disabled = false;
+    document.getElementById("url-input").disabled = false;
+    document.getElementById("btn-text").textContent = "Convert to PDF";
+  }
+
+  let recentJobData = null, recentJobOutputs = null;
+
+  async function checkRecentJob() {
+    const savedJob = localStorage.getItem("yt2pdf_last_job");
+    if (!savedJob) return;
+    try {
+      const res = await fetch(`/api/status/${savedJob}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.stage === "completed") {
+        const out = await fetch(`/api/outputs/${savedJob}`).then(r => r.json()).catch(() => ({ slides_pdf: true, study_guide_pdf: true }));
+        recentJobData = data;
+        recentJobOutputs = out;
+        jobId = savedJob;
+        document.getElementById("recent-job-id").textContent = savedJob;
+        document.getElementById("recent-job-banner").style.display = "flex";
+      }
+    } catch (err) {
+      console.warn("Could not check previous job:", err);
+    }
+  }
+
+  function viewRecentJob() {
+    if (recentJobData && recentJobOutputs) {
+      showResult(recentJobData, recentJobOutputs);
+    }
+  }
+
+  function dismissRecentJob() {
+    const banner = document.getElementById("recent-job-banner");
+    if (banner) banner.style.display = "none";
+    localStorage.removeItem("yt2pdf_last_job");
+  }
+
+  function resetForm() {
+    clearInterval(pollTimer);
+    jobId = null;
+    allJobSlides = [];
+    selectedSlideSet.clear();
+    closeSlideModal();
+    localStorage.removeItem("yt2pdf_last_job");
+    document.getElementById("url-input").value = "";
+    document.getElementById("url-input").disabled = false;
+    document.getElementById("submit-btn").disabled = false;
+    document.getElementById("btn-text").textContent = "Convert to PDF";
+    document.getElementById("progress-section").style.display = "none";
+    document.getElementById("result-section").style.display = "none";
+    document.getElementById("error-section").style.display = "none";
+    const banner = document.getElementById("recent-job-banner");
+    if (banner) banner.style.display = "none";
+    document.getElementById("progress-fill").style.width = "0%";
+    STEP_ORDER.forEach(id => document.getElementById(id).classList.remove("active","done"));
+    document.getElementById("url-input").focus();
+  }
+
+  // ── Dark / Light Theme Toggle ──
+  function toggleTheme() {
+    const current = document.documentElement.getAttribute('data-theme') || 'light';
+    const next = current === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    try {
+      localStorage.setItem('yt2pdf_theme', next);
+    } catch (e) {}
+  }
+
+  document.getElementById("url-input").addEventListener("keydown", e => {
+    if (e.key === "Enter") startJob();
+  });
+
+  window.addEventListener("DOMContentLoaded", async () => {
+    const urlJob = new URLSearchParams(window.location.search).get("job");
+    if (urlJob) {
+      jobId = urlJob;
+      try {
+        const data = await fetch(`/api/status/${urlJob}`).then(r => r.json());
+        const out = await fetch(`/api/outputs/${urlJob}`).then(r => r.json()).catch(() => ({ slides_pdf: true, study_guide_pdf: true }));
+        showResult(data, out);
+        return;
+      } catch (e) {
+        console.warn("Could not load job from URL param:", e);
+      }
+    }
+    await checkRecentJob();
+    document.getElementById("url-input").focus();
+  });
+</script>
+</body>
+</html>

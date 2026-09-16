@@ -1,0 +1,17 @@
+name = "yt2pdfs"
+main = "worker.js"
+compatibility_date = "2024-09-23"
+workers_dev = true
+
+routes = [
+  { pattern = "yt2pdfs.com/*", zone_name = "yt2pdfs.com" },
+  { pattern = "www.yt2pdfs.com/*", zone_name = "yt2pdfs.com" }
+]
+
+[assets]
+directory = "./static"
+binding = "ASSETS"
+not_found_handling = "404-page"
+
+[vars]
+BACKEND_URL = "https://enquiries-steps-presence-hospitals.trycloudflare.com"
