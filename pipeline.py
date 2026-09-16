@@ -141,62 +141,90 @@ def _build_ydl_opts_base(extra: dict = None) -> list[dict]:
     }
 
     # Support YouTube cookies to bypass cloud data-center anti-bot blocks
-    cookie_content = os.environ.get("YOUTUBE_COOKIES", "").strip()
+    # 1. Top priority: exact cookies.txt in repository root
+    repo_cookie = Path(__file__).parent / "cookies.txt"
     cookie_file = os.environ.get("YOUTUBE_COOKIE_FILE", "").strip()
+    cookie_content = os.environ.get("YOUTUBE_COOKIES", "").strip()
     has_valid_cookies = False
 
-    if cookie_content:
-        clean_content = _normalize_netscape_cookies(cookie_content)
-        cpath = Path(tempfile.gettempdir()) / "yt_cookies.txt"
-        cpath.write_text(clean_content, encoding="utf-8")
-        try:
-            import http.cookiejar
-            cj = http.cookiejar.MozillaCookieJar(str(cpath))
-            cj.load()
-            if len(cj) > 0:
-                base["cookiefile"] = str(cpath)
-                has_valid_cookies = True
-                log.info("Loaded %d valid YouTube cookies into cookiejar", len(cj))
-            else:
-                base["cookiefile"] = str(cpath)
-        except Exception as ce:
-            log.warning("Could not parse cookiejar: %s; using raw file", ce)
-            base["cookiefile"] = str(cpath)
+    if repo_cookie.exists() and repo_cookie.stat().st_size > 100:
+        base["cookiefile"] = str(repo_cookie)
+        has_valid_cookies = True
+        log.info("Using repository cookies.txt: %s (%d bytes)", repo_cookie, repo_cookie.stat().st_size)
+    elif os.path.exists("cookies.txt") and os.path.getsize("cookies.txt") > 100:
+        base["cookiefile"] = "cookies.txt"
+        has_valid_cookies = True
+        log.info("Using local cookies.txt")
     elif cookie_file and os.path.exists(cookie_file):
         base["cookiefile"] = cookie_file
         has_valid_cookies = True
-    elif (Path(__file__).parent / "cookies.txt").exists():
-        base["cookiefile"] = str(Path(__file__).parent / "cookies.txt")
-        has_valid_cookies = True
-    elif os.path.exists("cookies.txt"):
-        base["cookiefile"] = "cookies.txt"
+    elif cookie_content:
+        clean_content = _normalize_netscape_cookies(cookie_content)
+        cpath = Path(tempfile.gettempdir()) / "yt_cookies.txt"
+        cpath.write_text(clean_content, encoding="utf-8")
+        base["cookiefile"] = str(cpath)
         has_valid_cookies = True
 
     if extra:
         base.update(extra)
 
-    # Client variants to try:
-    client_variants = [
-        {},  # default web
-        {"extractor_args": {"youtube": {"player_client": ["web"]}}},
-        {"extractor_args": {"youtube": {"player_client": ["android"]}}},
-        {"extractor_args": {"youtube": {"player_client": ["mweb"]}}},
-        {"extractor_args": {"youtube": {"player_client": ["tv_embedded"]}}},
-    ]
-
-    # Try curl-cffi impersonation if installed
-    try:
-        import curl_cffi  # noqa
-        client_variants.insert(0, {"impersonate": "chrome"})
-    except Exception:
-        pass
-
     variants = []
-    for cv in client_variants:
-        v = dict(base)
-        v.update(cv)
-        v["logger"] = _YtdlpLogger()  # Fresh logger instance per attempt
-        variants.append(v)
+
+    # If cookies are present, try with cookies first
+    if has_valid_cookies and "cookiefile" in base:
+        # Default with cookies
+        v1 = dict(base)
+        v1["logger"] = _YtdlpLogger()
+        variants.append(v1)
+
+        # Web client with cookies
+        v2 = dict(base)
+        v2["extractor_args"] = {"youtube": {"player_client": ["web"]}}
+        v2["logger"] = _YtdlpLogger()
+        variants.append(v2)
+
+        # mweb client with cookies
+        v3 = dict(base)
+        v3["extractor_args"] = {"youtube": {"player_client": ["mweb"]}}
+        v3["logger"] = _YtdlpLogger()
+        variants.append(v3)
+
+        # Chrome TLS impersonation with cookies
+        try:
+            import curl_cffi  # noqa
+            v4 = dict(base)
+            v4["impersonate"] = "chrome"
+            v4["logger"] = _YtdlpLogger()
+            variants.append(v4)
+        except Exception:
+            pass
+
+    # Clean anonymous fallbacks WITHOUT cookies (in case cookies trigger bot-detection on cloud IP)
+    base_no_cookies = dict(base)
+    base_no_cookies.pop("cookiefile", None)
+
+    # Android client without cookies (bypasses web bot checks)
+    va = dict(base_no_cookies)
+    va["extractor_args"] = {"youtube": {"player_client": ["android"]}}
+    va["logger"] = _YtdlpLogger()
+    variants.append(va)
+
+    # iOS / mweb fallback without cookies
+    vm = dict(base_no_cookies)
+    vm["extractor_args"] = {"youtube": {"player_client": ["mweb"]}}
+    vm["logger"] = _YtdlpLogger()
+    variants.append(vm)
+
+    # TV embedded without cookies
+    vt = dict(base_no_cookies)
+    vt["extractor_args"] = {"youtube": {"player_client": ["tv_embedded"]}}
+    vt["logger"] = _YtdlpLogger()
+    variants.append(vt)
+
+    # Default fallback without cookies
+    vd = dict(base_no_cookies)
+    vd["logger"] = _YtdlpLogger()
+    variants.append(vd)
 
     return variants
 
