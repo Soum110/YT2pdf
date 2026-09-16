@@ -91,13 +91,24 @@ def _build_ydl_opts_base(extra: dict = None) -> list[dict]:
     cookie_content = os.environ.get("YOUTUBE_COOKIES", "").strip()
     cookie_file = os.environ.get("YOUTUBE_COOKIE_FILE", "").strip()
     if cookie_content:
+        if (cookie_content.startswith('"') and cookie_content.endswith('"')) or \
+           (cookie_content.startswith("'") and cookie_content.endswith("'")):
+            cookie_content = cookie_content[1:-1]
+        cookie_content = cookie_content.replace("\\n", "\n").replace("\\t", "\t")
         cpath = Path(tempfile.gettempdir()) / "yt_cookies.txt"
-        cpath.write_text(cookie_content)
+        cpath.write_text(cookie_content, encoding="utf-8")
         base["cookiefile"] = str(cpath)
     elif cookie_file and os.path.exists(cookie_file):
         base["cookiefile"] = cookie_file
     elif os.path.exists("cookies.txt"):
         base["cookiefile"] = "cookies.txt"
+
+    # Enable browser TLS impersonation via curl_cffi if installed
+    try:
+        import curl_cffi  # noqa
+        base["impersonate"] = "chrome"
+    except Exception:
+        pass
 
     if extra:
         base.update(extra)
@@ -108,12 +119,14 @@ def _build_ydl_opts_base(extra: dict = None) -> list[dict]:
             {},  # default web with cookies
             {"extractor_args": {"youtube": {"player_client": ["web"]}}},
             {"extractor_args": {"youtube": {"player_client": ["android"]}}},
+            {"extractor_args": {"youtube": {"player_client": ["mweb"]}}},
             {"extractor_args": {"youtube": {"player_client": ["tv_embedded"]}}},
         ]
     else:
         client_variants = [
-            {},  # default
             {"extractor_args": {"youtube": {"player_client": ["android"]}}},
+            {},  # default
+            {"extractor_args": {"youtube": {"player_client": ["mweb"]}}},
             {"extractor_args": {"youtube": {"player_client": ["tv_embedded"]}}},
             {"extractor_args": {"youtube": {"player_client": ["android", "web"]}}},
         ]
@@ -132,7 +145,9 @@ def _get_video_info(url: str) -> dict:
     import yt_dlp
 
     last_err = None
+    all_errors = []
     for opts in _build_ydl_opts_base({"skip_download": True}):
+        client = opts.get("extractor_args", {}).get("youtube", {}).get("player_client", ["default"])[0]
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=False)
@@ -144,11 +159,11 @@ def _get_video_info(url: str) -> dict:
             }
         except Exception as e:
             last_err = e
-            client = opts.get("extractor_args", {}).get("youtube", {}).get("player_client", ["default"])[0]
+            all_errors.append(f"{client}: {e}")
             log.warning("  yt-dlp info attempt failed (client=%s): %s", client, e)
             continue
 
-    raise RuntimeError(f"All yt-dlp attempts failed. Last error: {last_err}")
+    raise RuntimeError(f"All yt-dlp attempts failed. Errors: {'; '.join(all_errors[-2:])}")
 
 
 def _download_video(url: str, output_path: str, progress_hook: Optional[Callable] = None) -> str:

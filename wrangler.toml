@@ -17,4 +17,4 @@ binding = "ASSETS"
 not_found_handling = "404-page"
 
 [vars]
-BACKEND_URL = "https://enquiries-steps-presence-hospitals.trycloudflare.com"
+BACKEND_URL = "https://yt2pdf-sc1p.onrender.com"
