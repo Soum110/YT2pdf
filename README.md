@@ -3,8 +3,9 @@ title: YT2PDF Converter Engine
 emoji: 📑
 colorFrom: red
 colorTo: indigo
-sdk: docker
-app_port: 7860
+sdk: gradio
+sdk_version: 4.44.0
+app_file: app.py
 pinned: false
 ---
 
@@ -15,4 +16,4 @@ FastAPI + OpenCV + FFmpeg + Gemini AI slide extraction engine for [yt2pdfs.com](
 ### Features
 - Hybrid CV (OpenCV SSIM) + Gemini Multimodal AI slide transition detector.
 - Automatic PDF slide generation & comprehensive Markdown/LaTeX study guides.
-- Headless non-root container for Hugging Face Spaces.
+- 16 GB High-RAM cloud environment on Hugging Face Spaces.
