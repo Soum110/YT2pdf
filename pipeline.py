@@ -86,15 +86,29 @@ def _build_ydl_opts_base(extra: dict = None) -> list[dict]:
         "logger": _YtdlpLogger(),   # ← key fix: no stdout/stderr writes
         "noprogress": True,
     }
+
+    # Support YouTube cookies to bypass cloud data-center anti-bot blocks
+    cookie_content = os.environ.get("YOUTUBE_COOKIES", "").strip()
+    cookie_file = os.environ.get("YOUTUBE_COOKIE_FILE", "").strip()
+    if cookie_content:
+        cpath = Path(tempfile.gettempdir()) / "yt_cookies.txt"
+        cpath.write_text(cookie_content)
+        base["cookiefile"] = str(cpath)
+    elif cookie_file and os.path.exists(cookie_file):
+        base["cookiefile"] = cookie_file
+    elif os.path.exists("cookies.txt"):
+        base["cookiefile"] = "cookies.txt"
+
     if extra:
         base.update(extra)
 
-    # android client confirmed working without cookies or PO tokens
+    # Try android, ios, and mobile clients first
     client_variants = [
         {"extractor_args": {"youtube": {"player_client": ["android"]}}},
+        {"extractor_args": {"youtube": {"player_client": ["ios"]}}},
         {"extractor_args": {"youtube": {"player_client": ["android", "web"]}}},
         {"extractor_args": {"youtube": {"player_client": ["tv_embedded"]}}},
-        {"extractor_args": {"youtube": {"player_client": ["web_creator"]}}},
+        {"extractor_args": {"youtube": {"player_client": ["mweb"]}}},
         {},  # default fallback
     ]
 
