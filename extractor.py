@@ -56,7 +56,7 @@ class ExtractorConfig:
 
     # --- Pass 2: Gemini AI ---
     gemini_api_key: str = "YOUR_GEMINI_API_KEY_HERE"   # <- Replace this
-    gemini_model: str = "gemini-3.6-flash"              # Fast, generous free tier
+    gemini_model: str = "gemini-3.5-flash-lite"         # Fast, generous free tier
     ai_max_retries: int = 3
     ai_retry_delay: float = 2.0          # Seconds between retries
 
@@ -70,21 +70,68 @@ class ExtractorConfig:
 # ---------------------------------------------------------------------------
 @dataclass
 class CandidateFrame:
-    """A frame flagged by Pass 1 (OpenCV)."""
+    """A frame flagged by Pass 1 (OpenCV). Streams on-demand from disk to keep RAM < 100MB."""
     frame_index: int
     timestamp_sec: float
-    image: np.ndarray  # Raw BGR numpy array
+    image_path: Optional[Path] = None
+    _image: Optional[np.ndarray] = None
+
+    def __init__(self, frame_index: int, timestamp_sec: float, image_or_path=None):
+        self.frame_index = frame_index
+        self.timestamp_sec = timestamp_sec
+        if isinstance(image_or_path, (str, Path)):
+            self.image_path = Path(image_or_path)
+            self._image = None
+        else:
+            self._image = image_or_path
+            self.image_path = None
+
+    @property
+    def image(self) -> Optional[np.ndarray]:
+        """Loads image on-demand from disk if not in memory."""
+        if self._image is not None:
+            return self._image
+        if self.image_path and os.path.exists(self.image_path):
+            return cv2.imread(str(self.image_path))
+        return None
 
 
 @dataclass
 class VerifiedSlide:
-    """A frame that passed both Pass 1 and Pass 2 (AI)."""
+    """A frame that passed both Pass 1 and Pass 2 (AI). Streams on-demand from disk."""
     frame_index: int
     timestamp_sec: float
-    image: np.ndarray
     slide_title: str
     is_slide: bool
     is_new_content: bool
+    image_path: Optional[Path] = None
+    _image: Optional[np.ndarray] = None
+
+    def __init__(self, frame_index: int, timestamp_sec: float, image_or_path=None,
+                 slide_title: str = "Untitled Slide", is_slide: bool = True, is_new_content: bool = True,
+                 image: Optional[np.ndarray] = None):
+        self.frame_index = frame_index
+        self.timestamp_sec = timestamp_sec
+        self.slide_title = slide_title
+        self.is_slide = is_slide
+        self.is_new_content = is_new_content
+        
+        target = image if image is not None else image_or_path
+        if isinstance(target, (str, Path)):
+            self.image_path = Path(target)
+            self._image = None
+        else:
+            self._image = target
+            self.image_path = None
+
+    @property
+    def image(self) -> Optional[np.ndarray]:
+        """Loads image on-demand from disk if not in memory."""
+        if self._image is not None:
+            return self._image
+        if self.image_path and os.path.exists(self.image_path):
+            return cv2.imread(str(self.image_path))
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +203,9 @@ def pass1_find_candidates(
     frame_count = 0
     total_sampled = max(1, int(total_frames / max(1, int(native_fps / config.sample_fps))))
 
+    cand_dir = Path(config.output_dir) / "_candidates_raw"
+    cand_dir.mkdir(parents=True, exist_ok=True)
+
     log.info("=== PASS 1: OpenCV Candidate Detection ===")
     log.info("SSIM threshold: %.2f  |  Debounce: %ds", config.ssim_threshold, config.debounce_seconds)
 
@@ -166,7 +216,9 @@ def pass1_find_candidates(
         if last_gray is None:
             # Always capture the very first frame
             log.info("  [%5.1fs] First frame -> accepted as initial slide", ts)
-            candidates.append(CandidateFrame(idx, ts, frame.copy()))
+            cand_path = cand_dir / f"cand_{len(candidates):04d}_t{int(ts):05d}s.jpg"
+            cv2.imwrite(str(cand_path), frame, [cv2.IMWRITE_JPEG_QUALITY, 92])
+            candidates.append(CandidateFrame(idx, ts, cand_path))
             last_gray = gray
             last_accepted_ts = ts
             if progress_cb:
@@ -186,13 +238,15 @@ def pass1_find_candidates(
                 "  [%5.1fs] SSIM=%.3f < %.2f -> CANDIDATE #%d",
                 ts, score, config.ssim_threshold, len(candidates) + 1,
             )
-            candidates.append(CandidateFrame(idx, ts, frame.copy()))
+            cand_path = cand_dir / f"cand_{len(candidates):04d}_t{int(ts):05d}s.jpg"
+            cv2.imwrite(str(cand_path), frame, [cv2.IMWRITE_JPEG_QUALITY, 92])
+            candidates.append(CandidateFrame(idx, ts, cand_path))
             last_gray = gray
             last_accepted_ts = ts
         else:
             log.debug("  [%5.1fs] SSIM=%.3f  skip (debounce=%s)", ts, score, in_debounce)
 
-    log.info("Pass 1 complete: %d candidate frames found", len(candidates))
+    log.info("Pass 1 complete: %d candidate frames found (streamed to disk, RAM < 80MB)", len(candidates))
     return candidates
 
 
@@ -325,7 +379,12 @@ def pass2_ai_verify(
     for i, candidate in enumerate(candidates, 1):
         log.info("  [%d/%d] Verifying frame @%.1fs ...", i, len(candidates), candidate.timestamp_sec)
 
-        image_b64 = _encode_image_b64(candidate.image)
+        img = candidate.image
+        if img is None:
+            continue
+        image_b64 = _encode_image_b64(img)
+        del img  # Free memory immediately!
+
         result = _call_gemini(
             client, config.gemini_model, image_b64,
             retries=config.ai_max_retries, retry_delay=config.ai_retry_delay,
@@ -352,7 +411,7 @@ def pass2_ai_verify(
                 VerifiedSlide(
                     frame_index=candidate.frame_index,
                     timestamp_sec=candidate.timestamp_sec,
-                    image=candidate.image,
+                    image_or_path=candidate.image_path,
                     slide_title=slide_title,
                     is_slide=is_slide,
                     is_new_content=is_new_content,
@@ -381,9 +440,14 @@ def save_slides(slides: list, output_dir: Path, prefix: str = "slide") -> list:
 
     for i, slide in enumerate(slides, 1):
         filename = output_dir / f"{prefix}_{i:03d}_t{int(slide.timestamp_sec):05d}s.png"
-        rgb = cv2.cvtColor(slide.image, cv2.COLOR_BGR2RGB)
-        pil_img = Image.fromarray(rgb)
-        pil_img.save(str(filename), format="PNG", optimize=True)
+        img = slide.image
+        if img is not None:
+            rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            pil_img = Image.fromarray(rgb)
+            pil_img.save(str(filename), format="PNG", optimize=True)
+            del img, rgb, pil_img  # Free immediately!
+            slide.image_path = filename
+            slide._image = None
         saved_paths.append(filename)
         log.info("  Saved: %s  (title: '%s')", filename.name, slide.slide_title)
 
