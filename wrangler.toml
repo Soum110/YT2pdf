@@ -8,6 +8,9 @@ routes = [
   { pattern = "www.yt2pdfs.com/*", zone_name = "yt2pdfs.com" }
 ]
 
+[triggers]
+crons = ["*/30 * * * *"]
+
 [assets]
 directory = "./static"
 binding = "ASSETS"

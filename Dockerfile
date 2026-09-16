@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-# Install system dependencies: ffmpeg, build-essential, and OpenCV runtime libs
+# Install system dependencies: ffmpeg and OpenCV runtime libs
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libgl1 \
@@ -9,21 +9,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+# Set up a non-root user (required by Hugging Face Spaces)
+RUN useradd -m -u 1000 user
+USER user
+ENV HOME=/home/user \
+    PATH=/home/user/.local/bin:$PATH \
+    PORT=7860 \
+    PYTHONUNBUFFERED=1
 
-# Install Python requirements
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+WORKDIR $HOME/app
+
+# Install Python requirements as user
+COPY --chown=user requirements.txt .
+RUN pip install --no-cache-dir --user -r requirements.txt
 
 # Copy application source
-COPY . .
+COPY --chown=user . $HOME/app
 
-# Create jobs directory
-RUN mkdir -p jobs
+# Ensure jobs directory is created and writable
+RUN mkdir -p $HOME/app/jobs
 
-EXPOSE 8000
-
-ENV PORT=8000
-ENV PYTHONUNBUFFERED=1
+EXPOSE 7860
 
 CMD ["python3", "main.py"]

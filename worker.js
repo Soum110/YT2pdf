@@ -3,6 +3,21 @@
  */
 
 export default {
+  // Scheduled Cron Trigger: Fires every 30 mins to keep the backend awake 24/7
+  async scheduled(event, env, ctx) {
+    const backendBase = env.BACKEND_URL;
+    if (backendBase && !backendBase.includes("localhost") && !backendBase.includes("127.0.0.1")) {
+      try {
+        const pingUrl = new URL("/api/health", backendBase);
+        await fetch(pingUrl.toString(), {
+          headers: { "User-Agent": "YT2PDF-KeepAlive/1.0" }
+        });
+      } catch (err) {
+        console.error("Keep-alive ping error:", err.message);
+      }
+    }
+  },
+
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
