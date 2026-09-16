@@ -55,9 +55,14 @@ class _YtdlpLogger:
     Routes all yt-dlp output through Python's logging system.
     This completely avoids writing to stdout/stderr, which causes
     [Errno 32] Broken pipe when running inside background threads.
+    Also stores recent error messages so we can surface exact error reasons.
     """
+    def __init__(self):
+        self.errors = []
+        self.warnings = []
+
     def debug(self, msg):
-        if msg.startswith("[debug]"):
+        if str(msg).startswith("[debug]"):
             log.debug("yt-dlp: %s", msg)
         else:
             log.info("yt-dlp: %s", msg)
@@ -66,10 +71,60 @@ class _YtdlpLogger:
         log.info("yt-dlp: %s", msg)
 
     def warning(self, msg):
+        self.warnings.append(str(msg))
         log.warning("yt-dlp: %s", msg)
 
     def error(self, msg):
+        self.errors.append(str(msg))
         log.error("yt-dlp: %s", msg)
+
+
+def _normalize_netscape_cookies(text: str) -> str:
+    """
+    Cleans up cookie strings pasted into web UI / environment variables.
+    Handles:
+      - Enclosing quotes
+      - Escaped newlines (\\n) and tabs (\\t)
+      - Space-delimited rows converted to true tab-delimited Netscape format
+      - Base64-encoded cookie text
+    """
+    text = text.strip()
+    if (text.startswith('"') and text.endswith('"')) or (text.startswith("'") and text.endswith("'")):
+        text = text[1:-1]
+    text = text.replace("\\n", "\n").replace("\\t", "\t")
+
+    import base64
+    if not text.startswith("#") and len(text) > 50:
+        try:
+            decoded = base64.b64decode(text).decode("utf-8", errors="ignore")
+            if "# Netscape" in decoded or ".youtube.com" in decoded:
+                text = decoded
+        except Exception:
+            pass
+
+    lines = ["# Netscape HTTP Cookie File"]
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("#"):
+            if "Netscape" not in line:
+                lines.append(line)
+            continue
+        if "\t" in line:
+            parts = line.split("\t")
+            if len(parts) >= 6:
+                lines.append(line)
+                continue
+        # Split by consecutive whitespace into up to 7 parts
+        parts = line.split(None, 6)
+        if len(parts) == 7:
+            lines.append("\t".join(parts))
+        elif len(parts) == 6:
+            lines.append("\t".join(parts) + "\t")
+        else:
+            lines.append(line)
+    return "\n".join(lines) + "\n"
 
 
 def _build_ydl_opts_base(extra: dict = None) -> list[dict]:
@@ -77,64 +132,67 @@ def _build_ydl_opts_base(extra: dict = None) -> list[dict]:
     Returns a list of yt-dlp option dicts to try in order.
     Uses a custom logger (never writes to stdout/stderr) to prevent
     Broken pipe errors in background threads.
-    Android player client bypasses YouTube SABR/PO token blocking.
     """
     base = {
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
-        "logger": _YtdlpLogger(),   # ← key fix: no stdout/stderr writes
         "noprogress": True,
     }
 
     # Support YouTube cookies to bypass cloud data-center anti-bot blocks
     cookie_content = os.environ.get("YOUTUBE_COOKIES", "").strip()
     cookie_file = os.environ.get("YOUTUBE_COOKIE_FILE", "").strip()
+    has_valid_cookies = False
+
     if cookie_content:
-        if (cookie_content.startswith('"') and cookie_content.endswith('"')) or \
-           (cookie_content.startswith("'") and cookie_content.endswith("'")):
-            cookie_content = cookie_content[1:-1]
-        cookie_content = cookie_content.replace("\\n", "\n").replace("\\t", "\t")
+        clean_content = _normalize_netscape_cookies(cookie_content)
         cpath = Path(tempfile.gettempdir()) / "yt_cookies.txt"
-        cpath.write_text(cookie_content, encoding="utf-8")
-        base["cookiefile"] = str(cpath)
+        cpath.write_text(clean_content, encoding="utf-8")
+        try:
+            import http.cookiejar
+            cj = http.cookiejar.MozillaCookieJar(str(cpath))
+            cj.load()
+            if len(cj) > 0:
+                base["cookiefile"] = str(cpath)
+                has_valid_cookies = True
+                log.info("Loaded %d valid YouTube cookies into cookiejar", len(cj))
+            else:
+                base["cookiefile"] = str(cpath)
+        except Exception as ce:
+            log.warning("Could not parse cookiejar: %s; using raw file", ce)
+            base["cookiefile"] = str(cpath)
     elif cookie_file and os.path.exists(cookie_file):
         base["cookiefile"] = cookie_file
+        has_valid_cookies = True
     elif os.path.exists("cookies.txt"):
         base["cookiefile"] = "cookies.txt"
-
-    # Enable browser TLS impersonation via curl_cffi if installed
-    try:
-        import curl_cffi  # noqa
-        base["impersonate"] = "chrome"
-    except Exception:
-        pass
+        has_valid_cookies = True
 
     if extra:
         base.update(extra)
 
-    # Client order: with cookies, default client is best; without cookies, try android bypass
-    if "cookiefile" in base:
-        client_variants = [
-            {},  # default web with cookies
-            {"extractor_args": {"youtube": {"player_client": ["web"]}}},
-            {"extractor_args": {"youtube": {"player_client": ["android"]}}},
-            {"extractor_args": {"youtube": {"player_client": ["mweb"]}}},
-            {"extractor_args": {"youtube": {"player_client": ["tv_embedded"]}}},
-        ]
-    else:
-        client_variants = [
-            {"extractor_args": {"youtube": {"player_client": ["android"]}}},
-            {},  # default
-            {"extractor_args": {"youtube": {"player_client": ["mweb"]}}},
-            {"extractor_args": {"youtube": {"player_client": ["tv_embedded"]}}},
-            {"extractor_args": {"youtube": {"player_client": ["android", "web"]}}},
-        ]
+    # Client variants to try:
+    client_variants = [
+        {},  # default web
+        {"extractor_args": {"youtube": {"player_client": ["web"]}}},
+        {"extractor_args": {"youtube": {"player_client": ["android"]}}},
+        {"extractor_args": {"youtube": {"player_client": ["mweb"]}}},
+        {"extractor_args": {"youtube": {"player_client": ["tv_embedded"]}}},
+    ]
+
+    # Try curl-cffi impersonation if installed
+    try:
+        import curl_cffi  # noqa
+        client_variants.insert(0, {"impersonate": "chrome"})
+    except Exception:
+        pass
 
     variants = []
     for cv in client_variants:
         v = dict(base)
         v.update(cv)
+        v["logger"] = _YtdlpLogger()  # Fresh logger instance per attempt
         variants.append(v)
 
     return variants
@@ -144,10 +202,10 @@ def _get_video_info(url: str) -> dict:
     """Fetch video title and duration without downloading."""
     import yt_dlp
 
-    last_err = None
     all_errors = []
     for opts in _build_ydl_opts_base({"skip_download": True}):
         client = opts.get("extractor_args", {}).get("youtube", {}).get("player_client", ["default"])[0]
+        logger = opts.get("logger")
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=False)
@@ -158,12 +216,14 @@ def _get_video_info(url: str) -> dict:
                 "thumbnail": info.get("thumbnail", ""),
             }
         except Exception as e:
-            last_err = e
-            all_errors.append(f"{client}: {e}")
-            log.warning("  yt-dlp info attempt failed (client=%s): %s", client, e)
+            err_msg = str(e).strip()
+            if not err_msg and logger and logger.errors:
+                err_msg = logger.errors[-1].strip()
+            all_errors.append(f"{client}: {err_msg}")
+            log.warning("  yt-dlp info attempt failed (client=%s): %s", client, err_msg)
             continue
 
-    raise RuntimeError(f"All yt-dlp attempts failed. Errors: {'; '.join(all_errors[-2:])}")
+    raise RuntimeError(f"All yt-dlp attempts failed. Errors: {'; '.join(all_errors)}")
 
 
 def _download_video(url: str, output_path: str, progress_hook: Optional[Callable] = None) -> str:
@@ -196,9 +256,13 @@ def _download_video(url: str, output_path: str, progress_hook: Optional[Callable
             log.info("Download complete: %s", result)
             return result
         except Exception as e:
-            last_err = e
+            logger = opts.get("logger")
+            err_msg = str(e).strip()
+            if not err_msg and logger and logger.errors:
+                err_msg = logger.errors[-1].strip()
+            last_err = err_msg or e
             client = opts.get("extractor_args", {}).get("youtube", {}).get("player_client", ["default"])[0]
-            log.warning("  yt-dlp download attempt failed (client=%s): %s", client, e)
+            log.warning("  yt-dlp download attempt failed (client=%s): %s", client, err_msg)
             continue
 
     raise RuntimeError(f"All yt-dlp download attempts failed. Last error: {last_err}")
