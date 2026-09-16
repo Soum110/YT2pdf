@@ -401,6 +401,15 @@ def run_pipeline(job_id: str, video_url: str, jobs_root: Path, gemini_api_key: s
             "slide_count": len(verified),
         }))
 
+        # ── Cache completed job ───────────────────────────────────────────
+        try:
+            from drive_cache import cache_manager, extract_youtube_id
+            vid_id = extract_youtube_id(video_url)
+            if vid_id:
+                cache_manager.save_job_to_cache(vid_id, job_dir)
+        except Exception as cache_err:
+            log.warning("[%s] Failed to save to cache: %s", job_id, cache_err)
+
     except Exception as e:
         log.exception("[%s] Pipeline failed: %s", job_id, e)
         _write_status(job_dir, "failed", 0, "Processing failed.", error=str(e))

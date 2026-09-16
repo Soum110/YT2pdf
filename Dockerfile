@@ -26,9 +26,10 @@ RUN pip install --no-cache-dir --user -r requirements.txt
 # Copy application source
 COPY --chown=user . $HOME/app
 
-# Ensure jobs directory is created and writable
-RUN mkdir -p $HOME/app/jobs
+# Ensure jobs directory and cache are created and writable
+RUN mkdir -p $HOME/app/jobs/_cache
 
-EXPOSE 7860
+ENV PORT=8000
+EXPOSE 8000 7860
 
 CMD ["python3", "main.py"]

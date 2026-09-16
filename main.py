@@ -97,6 +97,14 @@ async def process_video(req: ProcessRequest):
 
     job_id = str(uuid.uuid4())[:8]  # Short ID like "a3f92c1d"
     job_dir = JOBS_ROOT / job_id
+
+    # Check cache first (instant 0-second response if previously converted)
+    from drive_cache import cache_manager, extract_youtube_id
+    video_id = extract_youtube_id(url)
+    if video_id and cache_manager.get_cached_job(video_id, job_dir):
+        log.info("Instant Cache Hit for video %s! Serving as job %s", video_id, job_id)
+        return ProcessResponse(job_id=job_id, message="Cached! Result ready instantly.")
+
     job_dir.mkdir(parents=True, exist_ok=True)
 
     # Write initial status immediately
