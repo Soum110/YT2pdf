@@ -360,8 +360,23 @@ async def handle_contact_form(req: ContactRequest):
 async def health():
     from pipeline import _normalize_netscape_cookies
     cookies_val = os.environ.get("YOUTUBE_COOKIES", "")
+    cookie_file = Path("cookies.txt")
+    if not cookie_file.exists():
+        cookie_file = Path(__file__).parent / "cookies.txt"
     valid_cookies_count = 0
-    if cookies_val:
+    cookies_source = "none"
+
+    if cookie_file.exists():
+        cookies_source = "cookies.txt"
+        try:
+            import http.cookiejar
+            cj = http.cookiejar.MozillaCookieJar(str(cookie_file))
+            cj.load()
+            valid_cookies_count = len(cj)
+        except Exception:
+            pass
+    elif cookies_val:
+        cookies_source = "env"
         try:
             import http.cookiejar, tempfile
             clean = _normalize_netscape_cookies(cookies_val)
@@ -373,11 +388,12 @@ async def health():
                 valid_cookies_count = len(cj)
         except Exception:
             pass
+
     return {
         "status": "ok",
         "api_key_set": bool(GEMINI_API_KEY),
-        "cookies_set": bool(cookies_val),
-        "cookies_length": len(cookies_val),
+        "cookies_set": bool(cookies_val) or cookie_file.exists(),
+        "cookies_source": cookies_source,
         "valid_cookies_count": valid_cookies_count,
     }
 

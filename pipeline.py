@@ -165,6 +165,9 @@ def _build_ydl_opts_base(extra: dict = None) -> list[dict]:
     elif cookie_file and os.path.exists(cookie_file):
         base["cookiefile"] = cookie_file
         has_valid_cookies = True
+    elif (Path(__file__).parent / "cookies.txt").exists():
+        base["cookiefile"] = str(Path(__file__).parent / "cookies.txt")
+        has_valid_cookies = True
     elif os.path.exists("cookies.txt"):
         base["cookiefile"] = "cookies.txt"
         has_valid_cookies = True
