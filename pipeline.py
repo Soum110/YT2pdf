@@ -102,15 +102,21 @@ def _build_ydl_opts_base(extra: dict = None) -> list[dict]:
     if extra:
         base.update(extra)
 
-    # Try android, ios, and mobile clients first
-    client_variants = [
-        {"extractor_args": {"youtube": {"player_client": ["android"]}}},
-        {"extractor_args": {"youtube": {"player_client": ["ios"]}}},
-        {"extractor_args": {"youtube": {"player_client": ["android", "web"]}}},
-        {"extractor_args": {"youtube": {"player_client": ["tv_embedded"]}}},
-        {"extractor_args": {"youtube": {"player_client": ["mweb"]}}},
-        {},  # default fallback
-    ]
+    # Client order: with cookies, default client is best; without cookies, try android bypass
+    if "cookiefile" in base:
+        client_variants = [
+            {},  # default web with cookies
+            {"extractor_args": {"youtube": {"player_client": ["web"]}}},
+            {"extractor_args": {"youtube": {"player_client": ["android"]}}},
+            {"extractor_args": {"youtube": {"player_client": ["tv_embedded"]}}},
+        ]
+    else:
+        client_variants = [
+            {},  # default
+            {"extractor_args": {"youtube": {"player_client": ["android"]}}},
+            {"extractor_args": {"youtube": {"player_client": ["tv_embedded"]}}},
+            {"extractor_args": {"youtube": {"player_client": ["android", "web"]}}},
+        ]
 
     variants = []
     for cv in client_variants:
