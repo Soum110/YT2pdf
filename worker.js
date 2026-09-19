@@ -2,10 +2,12 @@
  * worker.js — Cloudflare Worker Edge Router & Reverse Proxy for YT2PDFS
  */
 
+const DEFAULT_BACKEND = "https://yt2pdf-214301889618.europe-west1.run.app";
+
 export default {
   // Scheduled Cron Trigger: Fires every 30 mins to keep the backend awake 24/7
   async scheduled(event, env, ctx) {
-    const backendBase = env.BACKEND_URL;
+    const backendBase = env?.BACKEND_URL || DEFAULT_BACKEND;
     if (backendBase && !backendBase.includes("localhost") && !backendBase.includes("127.0.0.1")) {
       try {
         const pingUrl = new URL("/api/health", backendBase);
@@ -20,21 +22,10 @@ export default {
 
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    const backendBase = env?.BACKEND_URL || DEFAULT_BACKEND;
 
     // 1. Proxy API requests to Python FastAPI backend
     if (url.pathname.startsWith("/api/")) {
-      const backendBase = env.BACKEND_URL;
-      if (!backendBase || backendBase.includes("localhost") || backendBase.includes("127.0.0.1")) {
-        return new Response(JSON.stringify({
-          status: "waiting_for_backend",
-          message: "Frontend is running on Cloudflare Workers edge. To enable video conversion & contact API, point BACKEND_URL to your deployed Python server (e.g. on Render, Railway, Fly.io, or Cloudflare Tunnel).",
-          instruction: "Set BACKEND_URL in wrangler.toml or via Cloudflare Dashboard"
-        }, null, 2), {
-          status: 503,
-          headers: { "Content-Type": "application/json; charset=utf-8" }
-        });
-      }
-      
       try {
         const targetUrl = new URL(url.pathname + url.search, backendBase);
         const reqHeaders = new Headers(request.headers);
@@ -71,7 +62,7 @@ export default {
         return new Response(JSON.stringify({
           error: "Backend service unreachable",
           message: err.message,
-          suggestion: "Ensure your Python backend is running and BACKEND_URL is configured."
+          suggestion: "Ensure your Python backend is running."
         }), {
           status: 502,
           headers: { "Content-Type": "application/json" }
@@ -79,14 +70,26 @@ export default {
       }
     }
 
-    // 2. Map /static/* requests to root assets (e.g. /static/brand-icon.png -> /brand-icon.png)
-    if (url.pathname.startsWith("/static/")) {
-      const strippedPath = url.pathname.replace(/^\/static/, "");
-      const assetUrl = new URL(strippedPath + url.search, request.url);
-      return env.ASSETS.fetch(new Request(assetUrl, request));
+    // 2. Serve static assets if Cloudflare Workers Assets binding is available
+    if (env?.ASSETS?.fetch) {
+      if (url.pathname.startsWith("/static/")) {
+        const strippedPath = url.pathname.replace(/^\/static/, "");
+        const assetUrl = new URL(strippedPath + url.search, request.url);
+        return env.ASSETS.fetch(new Request(assetUrl, request));
+      }
+      return env.ASSETS.fetch(request);
     }
 
-    // 3. Serve static assets & MPA routes (with automatic 404-page fallback via wrangler.toml)
-    return env.ASSETS.fetch(request);
+    // 3. Fallback: Proxy everything directly to Google Cloud Run
+    const targetUrl = new URL(url.pathname + url.search, backendBase);
+    const reqHeaders = new Headers(request.headers);
+    reqHeaders.set("X-Forwarded-Host", url.host);
+    reqHeaders.set("X-Forwarded-Proto", url.protocol.replace(":", ""));
+    return fetch(targetUrl.toString(), {
+      method: request.method,
+      headers: reqHeaders,
+      body: (request.method !== "GET" && request.method !== "HEAD") ? request.body : undefined,
+      redirect: "follow"
+    });
   }
 };
