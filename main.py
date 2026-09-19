@@ -391,7 +391,7 @@ async def health():
 
     return {
         "status": "ok",
-        "commit": "authenticated-cookies-v2",
+        "commit": "android-vr-v1",
         "api_key_set": bool(GEMINI_API_KEY),
         "cookies_set": bool(cookies_val) or cookie_file.exists(),
         "cookies_source": cookies_source,

@@ -170,7 +170,29 @@ def _build_ydl_opts_base(extra: dict = None) -> list[dict]:
 
     variants = []
 
-    # If cookies are present, try with cookies first
+    base_no_cookies = dict(base)
+    base_no_cookies.pop("cookiefile", None)
+
+    # 1. Top priority: android_vr client without cookies (bypasses bot checks on cloud datacenter IPs)
+    v_vr = dict(base_no_cookies)
+    v_vr["extractor_args"] = {"youtube": {"player_client": ["android_vr"]}}
+    v_vr["logger"] = _YtdlpLogger()
+    variants.append(v_vr)
+
+    # 2. android_vr with cookies (if authenticated or age-restricted)
+    if has_valid_cookies and "cookiefile" in base:
+        v_vr_c = dict(base)
+        v_vr_c["extractor_args"] = {"youtube": {"player_client": ["android_vr"]}}
+        v_vr_c["logger"] = _YtdlpLogger()
+        variants.append(v_vr_c)
+
+    # 3. Android client without cookies
+    va = dict(base_no_cookies)
+    va["extractor_args"] = {"youtube": {"player_client": ["android"]}}
+    va["logger"] = _YtdlpLogger()
+    variants.append(va)
+
+    # 4. If cookies are present, try web/mweb with cookies
     if has_valid_cookies and "cookiefile" in base:
         # Default with cookies
         v1 = dict(base)
@@ -199,29 +221,12 @@ def _build_ydl_opts_base(extra: dict = None) -> list[dict]:
         except Exception:
             pass
 
-    # Clean anonymous fallbacks WITHOUT cookies (in case cookies trigger bot-detection on cloud IP)
-    base_no_cookies = dict(base)
-    base_no_cookies.pop("cookiefile", None)
-
-    # Android client without cookies (bypasses web bot checks)
-    va = dict(base_no_cookies)
-    va["extractor_args"] = {"youtube": {"player_client": ["android"]}}
-    va["logger"] = _YtdlpLogger()
-    variants.append(va)
-
-    # iOS / mweb fallback without cookies
+    # 5. Fallback without cookies
     vm = dict(base_no_cookies)
     vm["extractor_args"] = {"youtube": {"player_client": ["mweb"]}}
     vm["logger"] = _YtdlpLogger()
     variants.append(vm)
 
-    # TV embedded without cookies
-    vt = dict(base_no_cookies)
-    vt["extractor_args"] = {"youtube": {"player_client": ["tv_embedded"]}}
-    vt["logger"] = _YtdlpLogger()
-    variants.append(vt)
-
-    # Default fallback without cookies
     vd = dict(base_no_cookies)
     vd["logger"] = _YtdlpLogger()
     variants.append(vd)
@@ -264,7 +269,7 @@ def _download_video(url: str, output_path: str, progress_hook: Optional[Callable
     # Use our own progress hook that doesn't touch stdout
     hooks = [progress_hook] if progress_hook else []
 
-    format_str = "bestvideo[height<=720]+bestaudio/best[height<=720]/best"
+    format_str = "bestvideo[height<=720]/best[height<=720]/bestvideo/best"
 
     last_err = None
     for opts in _build_ydl_opts_base({
