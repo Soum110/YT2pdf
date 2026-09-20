@@ -39,7 +39,7 @@ YT2PDF Slide Companion adds an elegant, native-styled "[📄 Generate PDF (YT2PD
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 • 100% Open Source: All extension code is publicly viewable and auditable on GitHub (https://github.com/soumensen-ai/YT2pdf).
 • Zero Personal Data: We NEVER touch, access, or store your Google account, browsing history, or passwords.
-• Zero Ads & Telemetry: No third-party trackers, no advertisements, and no analytics bloatware.
+• Zero Extension Telemetry: No third-party trackers, no analytics bloatware, and single-purpose slide capture.
 • Single-Purpose Execution: Runs strictly on youtube.com watch pages when you explicitly trigger slide capture.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
