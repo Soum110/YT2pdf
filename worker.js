@@ -35,6 +35,7 @@ export default {
       try {
         const targetUrl = new URL(url.pathname + url.search, backendBase);
         const reqHeaders = new Headers(request.headers);
+        reqHeaders.set("Host", targetUrl.host);
         reqHeaders.set("X-Forwarded-Host", url.host);
         reqHeaders.set("X-Forwarded-Proto", url.protocol.replace(":", ""));
 
@@ -89,6 +90,7 @@ export default {
     // 3. Fallback: Proxy everything directly to Google Cloud Run
     const targetUrl = new URL(url.pathname + url.search, backendBase);
     const reqHeaders = new Headers(request.headers);
+    reqHeaders.set("Host", targetUrl.host);
     reqHeaders.set("X-Forwarded-Host", url.host);
     reqHeaders.set("X-Forwarded-Proto", url.protocol.replace(":", ""));
     return fetch(targetUrl.toString(), {
