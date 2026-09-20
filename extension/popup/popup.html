@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>YT2PDF Slide Companion</title>
+  <style>
+    :root {
+      --bg: #0F0F0F;
+      --card: #1F1F1F;
+      --border: rgba(255, 255, 255, 0.12);
+      --text: #FFFFFF;
+      --text-soft: #AAAAAA;
+      --primary: #FF0000;
+      --primary-hover: #E60000;
+      --success: #2BA640;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      width: 320px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      padding: 16px;
+      font-size: 13px;
+      line-height: 1.4;
+      user-select: none;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .header-logo {
+      width: 26px;
+      height: 26px;
+      border-radius: 6px;
+    }
+
+    .header-title {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.2px;
+    }
+
+    .header-tag {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      background: rgba(255, 0, 0, 0.15);
+      color: var(--primary);
+      padding: 2px 6px;
+      border-radius: 4px;
+      letter-spacing: 0.4px;
+    }
+
+    .video-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      margin-bottom: 14px;
+    }
+
+    .video-label {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      color: var(--text-soft);
+      margin-bottom: 4px;
+      letter-spacing: 0.5px;
+    }
+
+    .video-title {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .not-youtube-banner {
+      display: none;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      text-align: center;
+      color: var(--text-soft);
+      font-size: 12px;
+      margin-bottom: 14px;
+    }
+
+    .btn-capture {
+      width: 100%;
+      height: 40px;
+      border-radius: 8px;
+      border: none;
+      background: var(--primary);
+      color: #FFFFFF;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: background 0.15s, transform 0.1s;
+    }
+
+    .btn-capture:hover {
+      background: var(--primary-hover);
+    }
+
+    .btn-capture:active {
+      transform: scale(0.98);
+    }
+
+    .btn-capture:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .trust-box {
+      margin-top: 14px;
+      background: rgba(43, 166, 64, 0.08);
+      border: 1px solid rgba(43, 166, 64, 0.2);
+      border-radius: 8px;
+      padding: 10px;
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+
+    .trust-icon {
+      color: var(--success);
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .trust-text {
+      font-size: 11px;
+      color: #D1E7D5;
+      line-height: 1.35;
+    }
+
+    .footer {
+      margin-top: 12px;
+      text-align: center;
+    }
+
+    .footer a {
+      color: var(--text-soft);
+      text-decoration: none;
+      font-size: 11px;
+      transition: color 0.15s;
+    }
+
+    .footer a:hover {
+      color: var(--text);
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <img src="../icons/icon-48.png" alt="YT2PDF" class="header-logo" />
+    <div style="flex:1;">
+      <div class="header-title">YT2PDFS Companion</div>
+    </div>
+    <span class="header-tag">Safe</span>
+  </div>
+
+  <div id="video-card" class="video-card">
+    <div class="video-label">Active YouTube Video</div>
+    <div id="video-title" class="video-title">Detecting video...</div>
+  </div>
+
+  <div id="not-youtube" class="not-youtube-banner">
+    Open any YouTube video tab to start capturing slides.
+  </div>
+
+  <button id="extract-btn" class="btn-capture">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+      <polyline points="14 2 14 8 20 8"></polyline>
+      <line x1="16" y1="13" x2="8" y2="13"></line>
+      <line x1="16" y1="17" x2="8" y2="17"></line>
+      <polyline points="10 9 9 9 8 9"></polyline>
+    </svg>
+    <span>Extract Slides & Open in Site</span>
+  </button>
+
+  <div class="trust-box">
+    <svg class="trust-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+    </svg>
+    <div class="trust-text">
+      <strong>100% Privacy Preserved:</strong> Captures video frames directly from your browser tab to bypass YouTube server bot checks. Zero login or cookies stored.
+    </div>
+  </div>
+
+  <div class="footer">
+    <a href="https://yt2pdfs.com" target="_blank" rel="noopener">Visit YT2PDFS.com ↗</a>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

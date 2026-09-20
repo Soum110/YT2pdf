@@ -75,9 +75,35 @@ def _ensure_pot_server():
         log.warning("Failed to launch bgutil-pot server: %s", e)
 
 
+def ensure_extension_zip():
+    """Packages the extension/ folder into static/yt2pdf-extension.zip if needed."""
+    import zipfile
+    ext_dir = Path("extension")
+    zip_path = Path("static/yt2pdf-extension.zip")
+    if not ext_dir.exists():
+        return
+    ext_files = [
+        f for f in ext_dir.rglob("*")
+        if f.is_file() and not f.name.startswith(".") and not f.name.endswith(".py") and "__pycache__" not in str(f)
+    ]
+    if not ext_files:
+        return
+    max_mtime = max(f.stat().st_mtime for f in ext_files)
+    if zip_path.exists() and zip_path.stat().st_mtime >= max_mtime:
+        return
+
+    zip_path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for f in ext_files:
+            rel = f.relative_to(ext_dir)
+            zf.write(f, arcname=str(rel))
+    log.info("Packaged Chrome extension to %s (%d bytes)", zip_path, zip_path.stat().st_size)
+
+
 @app.on_event("startup")
 async def on_startup():
     _ensure_pot_server()
+    ensure_extension_zip()
 
 
 # ─────────────────────────────────────────────
@@ -90,6 +116,19 @@ class ProcessRequest(BaseModel):
 class ProcessResponse(BaseModel):
     job_id: str
     message: str
+
+
+class CompanionFrame(BaseModel):
+    timestamp: float
+    time_formatted: Optional[str] = None
+    data: str
+
+
+class CompanionUploadRequest(BaseModel):
+    video_url: str
+    title: str = "Presentation Slides"
+    duration: Optional[float] = 0.0
+    frames: list[CompanionFrame]
 
 
 class RebuildSlidesRequest(BaseModel):
@@ -162,6 +201,66 @@ async def process_video(req: ProcessRequest):
 
     log.info("Job %s queued for: %s", job_id, url)
     return ProcessResponse(job_id=job_id, message="Processing started.")
+
+
+@app.post("/api/companion/upload-frames")
+async def upload_companion_frames(req: CompanionUploadRequest):
+    """
+    Accepts client-captured slide frames directly from the YT2PDF Slide Companion Chrome extension.
+    Bypasses YouTube datacenter bot detection by capturing frames in the client's browser.
+    """
+    if not req.frames:
+        raise HTTPException(status_code=400, detail="No frames provided in payload.")
+
+    job_id = str(uuid.uuid4())[:8]
+    job_dir = JOBS_ROOT / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+
+    from pipeline import _write_status, run_pipeline_from_frames
+
+    _write_status(
+        job_dir,
+        "companion_received",
+        20,
+        f"Received {len(req.frames)} frames from browser extension. Starting AI pipeline...",
+    )
+
+    frames_dicts = [f.model_dump() if hasattr(f, "model_dump") else f.dict() for f in req.frames]
+
+    executor.submit(
+        run_pipeline_from_frames,
+        job_id=job_id,
+        frames_data=frames_dicts,
+        video_title=req.title,
+        video_url=req.video_url,
+        duration=req.duration or 0.0,
+        jobs_root=JOBS_ROOT,
+        gemini_api_key=GEMINI_API_KEY,
+    )
+
+    log.info("Companion job %s started for %s with %d frames", job_id, req.video_url, len(req.frames))
+    return JSONResponse(content={
+        "job_id": job_id,
+        "status": "processing",
+        "message": f"Successfully received {len(req.frames)} frames. Processing started."
+    })
+
+
+@app.api_route("/api/extension/download", methods=["GET", "HEAD"])
+async def download_extension():
+    """Direct download for the packaged YT2PDF Slide Companion Chrome Extension (.zip)."""
+    zip_path = Path("static/yt2pdf-extension.zip")
+    if not zip_path.exists():
+        ensure_extension_zip()
+    if not zip_path.exists():
+        raise HTTPException(status_code=404, detail="Extension package not found.")
+    return FileResponse(
+        path=str(zip_path),
+        media_type="application/zip",
+        filename="yt2pdf-companion-extension.zip",
+        headers={"Content-Disposition": "attachment; filename=yt2pdf-companion-extension.zip"},
+    )
+
 
 
 @app.get("/api/status/{job_id}")

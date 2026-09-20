@@ -613,3 +613,182 @@ def run_pipeline(job_id: str, video_url: str, jobs_root: Path, gemini_api_key: s
                 log.info("[%s] Cleaned up temp dir: %s", job_id, tmp_dir)
             except Exception:
                 pass
+
+
+def run_pipeline_from_frames(
+    job_id: str,
+    frames_data: list,
+    video_title: str,
+    video_url: str,
+    duration: float,
+    jobs_root: Path,
+    gemini_api_key: str,
+):
+    """
+    Orchestration pipeline for client-captured frames (YT2PDF Slide Companion Extension).
+    Directly processes browser-captured frames, bypassing YouTube datacenter bot detection.
+    Runs AI verification or deduplication, builds slides PDF, and optionally compiles a study guide.
+    """
+    import base64
+    from slide_extractor import CandidateFrame, ExtractorConfig, pass2_ai_verify, save_slides, VerifiedSlide
+
+    job_dir = jobs_root / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    slides_dir = job_dir / "slides"
+    slides_dir.mkdir(parents=True, exist_ok=True)
+    raw_frames_dir = job_dir / "_raw_frames"
+    raw_frames_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        log.info("[%s] Companion pipeline starting with %d frames", job_id, len(frames_data))
+        _write_status(job_dir, "companion_received", 30, f"Decoding {len(frames_data)} frames from browser...")
+
+        # Save meta.json
+        meta = {
+            "video_title": video_title,
+            "video_url": video_url,
+            "duration": duration,
+            "source": "chrome_companion",
+            "frame_count": len(frames_data),
+        }
+        (job_dir / "meta.json").write_text(json.dumps(meta, indent=2))
+
+        # Decode base64 frames to candidate image files
+        candidates = []
+        for idx, item in enumerate(frames_data, 1):
+            ts = float(item.get("timestamp", idx * 10))
+            b64_str = item.get("data", "")
+            if not b64_str:
+                continue
+            if "," in b64_str:
+                b64_str = b64_str.split(",", 1)[1]
+            try:
+                img_bytes = base64.b64decode(b64_str)
+                frame_path = raw_frames_dir / f"cand_{idx:03d}_t{int(ts):05d}s.jpg"
+                frame_path.write_bytes(img_bytes)
+                candidates.append(CandidateFrame(frame_index=idx, timestamp_sec=ts, image_or_path=frame_path))
+            except Exception as dec_err:
+                log.warning("[%s] Failed to decode frame %d: %s", job_id, idx, dec_err)
+
+        if not candidates:
+            _write_status(job_dir, "failed", 0, "No valid frames could be decoded.", error="No frames decoded")
+            return
+
+        log.info("[%s] Decoded %d valid candidate frames", job_id, len(candidates))
+
+        # AI verification pass (Gemini)
+        verified = []
+        if gemini_api_key and gemini_api_key != "YOUR_GEMINI_API_KEY_HERE":
+            _write_status(job_dir, "ai_verifying", 50, f"AI verifying {len(candidates)} frames...")
+            config = ExtractorConfig(
+                gemini_api_key=gemini_api_key,
+                gemini_model="gemini-3.5-flash-lite",
+                output_dir=slides_dir,
+            )
+
+            def p2_cb(i, total):
+                pct = 50 + int((i / total) * 25)  # 50-75%
+                _write_status(job_dir, "ai_verifying", min(pct, 75), f"AI verifying frame {i} of {total}...")
+
+            try:
+                verified = pass2_ai_verify(candidates, config, progress_cb=p2_cb)
+                log.info("[%s] AI verification accepted %d/%d frames", job_id, len(verified), len(candidates))
+            except Exception as ai_err:
+                log.warning("[%s] Gemini verification error: %s. Falling back to all candidate frames.", job_id, ai_err)
+                verified = []
+
+        # Fallback if AI rejected all or was unavailable
+        if not verified:
+            log.info("[%s] Using all %d candidate frames as slides", job_id, len(candidates))
+            for idx, c in enumerate(candidates, 1):
+                mins, secs = divmod(int(c.timestamp_sec), 60)
+                verified.append(VerifiedSlide(
+                    frame_index=c.frame_index,
+                    timestamp_sec=c.timestamp_sec,
+                    image_or_path=c.image_path,
+                    slide_title=f"Slide {idx} ({mins:02d}:{secs:02d})",
+                    is_slide=True,
+                    is_new_content=True,
+                ))
+
+        # Save slide images to final slides_dir as PNGs
+        _write_status(job_dir, "building_pdf", 78, "Saving slide images...")
+        saved_paths = save_slides(verified, slides_dir)
+
+        # Build Slides PDF
+        _write_status(job_dir, "building_pdf", 82, f"Building slides PDF from {len(saved_paths)} slides...")
+        from pdf_builder import build_pdf
+        titles = [s.slide_title for s in verified]
+        slides_pdf_path = job_dir / "output.pdf"
+        build_pdf(
+            image_paths=saved_paths,
+            slide_titles=titles,
+            output_path=slides_pdf_path,
+            video_title=video_title,
+            include_cover=True,
+        )
+        log.info("[%s] Slides PDF ready: %s", job_id, slides_pdf_path)
+
+        # Optional: Transcript & Study guide
+        guide_ready = False
+        try:
+            from transcript_fetcher import fetch_transcript
+            transcript_tmp = tempfile.mkdtemp(prefix=f"yt2pdf_tr_{job_id}_")
+            try:
+                transcript_segments = fetch_transcript(video_url, tmp_dir=transcript_tmp)
+            finally:
+                shutil.rmtree(transcript_tmp, ignore_errors=True)
+
+            if transcript_segments and gemini_api_key and gemini_api_key != "YOUR_GEMINI_API_KEY_HERE":
+                _write_status(job_dir, "generating_guide", 88, f"AI writing study guide for {len(verified)} slides...")
+                from study_guide_generator import generate_study_guide_content
+                crops_dir = job_dir / "diagram_crops"
+                crops_dir.mkdir(parents=True, exist_ok=True)
+                study_guide = generate_study_guide_content(
+                    slides=verified,
+                    transcript_segments=transcript_segments,
+                    total_duration=float(duration),
+                    gemini_api_key=gemini_api_key,
+                    crops_dir=crops_dir,
+                    gemini_model="gemini-3.5-flash-lite",
+                )
+                from pdf_study_guide import build_study_guide_pdf
+                guide_pdf_path = job_dir / "study_guide.pdf"
+                build_study_guide_pdf(
+                    study_guide=study_guide,
+                    output_path=guide_pdf_path,
+                    video_title=video_title,
+                )
+                guide_ready = True
+        except Exception as guide_err:
+            log.warning("[%s] Optional study guide generation skipped/failed: %s", job_id, guide_err)
+
+        # Cleanup raw frames
+        shutil.rmtree(raw_frames_dir, ignore_errors=True)
+
+        # Write final completion status & outputs
+        _write_status(
+            job_dir, "completed", 100,
+            f"Done! {len(verified)} slides extracted."
+            + (" Study guide also ready!" if guide_ready else ""),
+            slide_count=len(verified),
+        )
+        (job_dir / "outputs.json").write_text(json.dumps({
+            "slides_pdf": True,
+            "study_guide_pdf": guide_ready,
+            "slide_count": len(verified),
+        }))
+
+        # Cache completed job
+        try:
+            from drive_cache import cache_manager, extract_youtube_id
+            vid_id = extract_youtube_id(video_url)
+            if vid_id:
+                cache_manager.save_job_to_cache(vid_id, job_dir)
+        except Exception as cache_err:
+            log.warning("[%s] Failed to save to cache: %s", job_id, cache_err)
+
+    except Exception as e:
+        log.exception("[%s] Companion pipeline failed: %s", job_id, e)
+        _write_status(job_dir, "failed", 0, "Processing failed.", error=str(e))
+
