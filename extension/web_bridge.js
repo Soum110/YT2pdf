@@ -14,9 +14,23 @@
     detail: { version: "1.0.0", active: true }
   }));
 
+  function isExtensionContextValid() {
+    try {
+      return Boolean(typeof chrome !== "undefined" && chrome?.runtime && chrome.runtime.id);
+    } catch (e) {
+      return false;
+    }
+  }
+
   // Re-broadcast periodically for late-initializing SPAs
   let announceCount = 0;
   const announcer = setInterval(() => {
+    if (!isExtensionContextValid()) {
+      clearInterval(announcer);
+      delete document.documentElement.dataset.yt2pdfCompanion;
+      window.__YT2PDF_COMPANION_ACTIVE__ = false;
+      return;
+    }
     document.documentElement.dataset.yt2pdfCompanion = "active";
     window.__YT2PDF_COMPANION_ACTIVE__ = true;
     window.dispatchEvent(new CustomEvent("YT2PDF_COMPANION_READY", {
@@ -36,34 +50,49 @@
       return;
     }
 
+    if (!isExtensionContextValid()) {
+      window.dispatchEvent(new CustomEvent("YT2PDF_EXTRACTION_RESULT", {
+        detail: { success: false, error: "Extension was reloaded or updated. Please refresh the page (F5)." }
+      }));
+      return;
+    }
+
     console.log("[YT2PDF Bridge] Forwarding silent extraction request to background worker for:", videoUrl);
 
-    chrome.runtime.sendMessage({
-      action: "start_background_extraction",
-      video_url: videoUrl
-    }, (response) => {
-      if (chrome.runtime.lastError) {
-        console.warn("[YT2PDF Bridge] Runtime error:", chrome.runtime.lastError.message);
-        window.dispatchEvent(new CustomEvent("YT2PDF_EXTRACTION_RESULT", {
-          detail: { success: false, error: chrome.runtime.lastError.message }
-        }));
-      } else if (response && response.success) {
-        console.log("[YT2PDF Bridge] Silent background extraction succeeded! Job ID:", response.job_id);
-        window.dispatchEvent(new CustomEvent("YT2PDF_EXTRACTION_RESULT", {
-          detail: {
-            success: true,
-            job_id: response.job_id,
-            backend_base: response.backend_base,
-            slide_count: response.slide_count
-          }
-        }));
-      } else {
-        console.warn("[YT2PDF Bridge] Extraction failed:", response?.error);
-        window.dispatchEvent(new CustomEvent("YT2PDF_EXTRACTION_RESULT", {
-          detail: { success: false, error: response?.error || "Silent background extraction failed." }
-        }));
-      }
-    });
+    try {
+      chrome.runtime.sendMessage({
+        action: "start_background_extraction",
+        video_url: videoUrl
+      }, (response) => {
+        const lastErr = chrome?.runtime?.lastError;
+        if (lastErr) {
+          console.warn("[YT2PDF Bridge] Runtime error:", lastErr.message);
+          window.dispatchEvent(new CustomEvent("YT2PDF_EXTRACTION_RESULT", {
+            detail: { success: false, error: lastErr.message }
+          }));
+        } else if (response && response.success) {
+          console.log("[YT2PDF Bridge] Silent background extraction succeeded! Job ID:", response.job_id);
+          window.dispatchEvent(new CustomEvent("YT2PDF_EXTRACTION_RESULT", {
+            detail: {
+              success: true,
+              job_id: response.job_id,
+              backend_base: response.backend_base,
+              slide_count: response.slide_count
+            }
+          }));
+        } else {
+          console.warn("[YT2PDF Bridge] Extraction failed:", response?.error);
+          window.dispatchEvent(new CustomEvent("YT2PDF_EXTRACTION_RESULT", {
+            detail: { success: false, error: response?.error || "Silent background extraction failed." }
+          }));
+        }
+      });
+    } catch (err) {
+      console.warn("[YT2PDF Bridge] Error sending message:", err.message);
+      window.dispatchEvent(new CustomEvent("YT2PDF_EXTRACTION_RESULT", {
+        detail: { success: false, error: err.message }
+      }));
+    }
   });
 
   // Also listen for ping requests from webpage

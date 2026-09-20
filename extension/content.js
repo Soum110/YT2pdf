@@ -81,6 +81,109 @@
   }
 
   // ─────────────────────────────────────────────
+  // Extension Context & Direct Transmission Resilience
+  // ─────────────────────────────────────────────
+  function isExtensionContextValid() {
+    try {
+      return Boolean(typeof chrome !== "undefined" && chrome?.runtime && chrome.runtime.id);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function safeSendRuntimeMessage(message, callback) {
+    if (!isExtensionContextValid()) {
+      if (callback) callback({ success: false, error: "Extension context invalidated" });
+      return;
+    }
+    try {
+      chrome.runtime.sendMessage(message, (res) => {
+        const lastErr = chrome?.runtime?.lastError;
+        if (lastErr) {
+          if (callback) callback({ success: false, error: lastErr.message });
+        } else {
+          if (callback) callback(res || { success: true });
+        }
+      });
+    } catch (e) {
+      if (callback) callback({ success: false, error: e.message });
+    }
+  }
+
+  async function directUploadFrames(payload) {
+    const candidateBases = [
+      "https://yt2pdfs.com",
+      "https://yt2pdf-214301889618.europe-west1.run.app",
+      "http://localhost:8080",
+      "http://localhost:8000"
+    ];
+
+    let lastError = null;
+    for (const base of candidateBases) {
+      try {
+        console.log(`[YT2PDF Companion] Direct upload attempt to ${base}...`);
+        const response = await fetch(`${base}/api/companion/upload-frames`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+          },
+          body: JSON.stringify(payload)
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          data.backend_base = base;
+          return data;
+        } else {
+          const errorText = await response.text().catch(() => "");
+          lastError = new Error(`Server ${base} returned HTTP ${response.status}: ${errorText}`);
+        }
+      } catch (netErr) {
+        console.warn(`[YT2PDF Companion] Direct upload network error on ${base}:`, netErr.message);
+        lastError = netErr;
+      }
+    }
+
+    throw lastError || new Error("Failed to reach YT2PDFS server.");
+  }
+
+  async function uploadFramesSafely(payload) {
+    // 1. Try background service worker if extension context is alive
+    if (isExtensionContextValid()) {
+      try {
+        const bgResult = await new Promise((resolve, reject) => {
+          try {
+            chrome.runtime.sendMessage({
+              action: "upload_frames",
+              payload: payload
+            }, (res) => {
+              const lastErr = chrome?.runtime?.lastError;
+              if (lastErr) {
+                reject(new Error(lastErr.message));
+              } else if (res && res.success) {
+                resolve(res.data);
+              } else {
+                reject(new Error(res?.error || "Background worker rejected upload"));
+              }
+            });
+          } catch (syncErr) {
+            reject(syncErr);
+          }
+        });
+        return bgResult;
+      } catch (bgErr) {
+        console.warn("[YT2PDF Companion] Background worker error, falling back to direct upload:", bgErr.message);
+      }
+    } else {
+      console.log("[YT2PDF Companion] Extension context disconnected/reloaded; proceeding with direct web upload.");
+    }
+
+    // 2. Fallback: Direct web upload (completely immune to extension context invalidation)
+    return await directUploadFrames(payload);
+  }
+
+  // ─────────────────────────────────────────────
   // Silent Background Tab Mode (Website Automation)
   // ─────────────────────────────────────────────
   const isHeadless = new URLSearchParams(window.location.search).get("yt2pdf_headless") === "1";
@@ -101,7 +204,7 @@
 
     if (!video || !video.duration || isNaN(video.duration)) {
       console.warn("[YT2PDF Companion] Video element not ready after 15s.");
-      chrome.runtime.sendMessage({
+      safeSendRuntimeMessage({
         action: "headless_extraction_failed",
         error: "Unable to load YouTube video stream in silent background tab."
       });
@@ -211,7 +314,7 @@
         frames: capturedSlides
       };
 
-      chrome.runtime.sendMessage({
+      safeSendRuntimeMessage({
         action: "upload_frames",
         payload: payload,
         headless: true
@@ -219,7 +322,7 @@
 
     } catch (err) {
       console.error("[YT2PDF Companion] Headless extraction error:", err);
-      chrome.runtime.sendMessage({
+      safeSendRuntimeMessage({
         action: "headless_extraction_failed",
         error: err.message
       });
@@ -369,33 +472,8 @@
         frames: capturedSlides
       };
 
-      // Upload frames: First try background service worker (bypasses page CORS completely)
-      let uploadResult = null;
-      let uploadError = null;
-
-      try {
-        uploadResult = await new Promise((resolve, reject) => {
-          if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
-            chrome.runtime.sendMessage({
-              action: "upload_frames",
-              payload: payload
-            }, (res) => {
-              if (chrome.runtime.lastError) {
-                reject(new Error(chrome.runtime.lastError.message + ". Please reload extension in chrome://extensions"));
-              } else if (res && res.success) {
-                resolve(res.data);
-              } else {
-                reject(new Error(res?.error || "Server upload failed"));
-              }
-            });
-          } else {
-            reject(new Error("Extension messaging unavailable. Please reload extension."));
-          }
-        });
-      } catch (bgErr) {
-        console.error("[YT2PDF Companion] Background worker error:", bgErr);
-        throw bgErr;
-      }
+      // Upload frames: Safe multi-strategy upload (background worker with direct HTTP fallback)
+      const uploadResult = await uploadFramesSafely(payload);
 
       const jobId = uploadResult.job_id;
       // Always direct users to the official domain yt2pdfs.com
@@ -423,11 +501,16 @@
 
     } catch (err) {
       console.error("[YT2PDF Companion Error]:", err);
-      showToast(`Extraction failed: ${err.message}`, true);
+      let errorMsg = err?.message || "Unknown error";
+      if (errorMsg.includes("Extension context invalidated")) {
+        errorMsg = "Extension was updated. Please refresh this tab (F5) to complete setup.";
+      }
+      showToast(`Extraction failed: ${errorMsg}`, true);
       buttonEl.innerHTML = originalContent;
       buttonEl.style.opacity = "1";
       isExtracting = false;
-    } finally {
+    }
+ finally {
       video.currentTime = originalTime;
       video.muted = originalMuted;
       if (!wasPaused) video.play().catch(() => {});
@@ -555,14 +638,18 @@
   window.addEventListener("popstate", injectButton);
 
   // Message listener for popup
-  if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage) {
-    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-      if (request.action === "extract_slides") {
-        const btn = document.getElementById("yt2pdf-action-btn") || document.createElement("button");
-        startSlideExtraction(btn);
-        sendResponse({ started: true });
-      }
-      return true;
-    });
+  if (isExtensionContextValid() && chrome?.runtime?.onMessage) {
+    try {
+      chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+        if (request.action === "extract_slides") {
+          const btn = document.getElementById("yt2pdf-action-btn") || document.createElement("button");
+          startSlideExtraction(btn);
+          try {
+            sendResponse({ started: true });
+          } catch (e) {}
+        }
+        return true;
+      });
+    } catch (e) {}
   }
 })();
