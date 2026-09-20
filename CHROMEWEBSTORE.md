@@ -69,13 +69,11 @@ YT2PDF Slide Companion adds an elegant, native-styled "[📄 Generate PDF (YT2PD
 
 ### Host Permissions:
 - `*://*.youtube.com/*`
-  > **Justification:** Necessary to detect the HTML5 `<video>` element and inject the "[📄 Generate PDF]" button into the YouTube watch interface.
+  > **Justification:** Necessary to detect the HTML5 `<video>` player, sample presentation slide frames, and inject the native `[📄 PDF Slides]` button into the YouTube watch interface.
 - `https://yt2pdfs.com/*`
-  > **Justification:** Required to transmit candidate slide frames to the user's conversion pipeline on YT2PDFS.com and open the slide curation interface.
+  > **Justification:** Required to bridge silent extraction requests when the user pastes a link on YT2PDFS.com and transmit candidate slide frames to the conversion pipeline.
 - `https://*.run.app/*`
-  > **Justification:** Secondary direct backend endpoint on Google Cloud Run to provide high availability and zero-downtime failover during traffic spikes.
-- `http://localhost:*`
-  > **Justification:** Used exclusively for developer testing and local offline validation.
+  > **Justification:** Direct backend endpoint on Google Cloud Run to ensure reliable frame processing and failover during traffic spikes.
 
 ---
 
@@ -93,4 +91,55 @@ YT2PDF Slide Companion adds an elegant, native-styled "[📄 Generate PDF (YT2PD
 | Does the extension collect financial or payment information? | **No** | The tool and extension are completely free. |
 | Does the extension sell data to third parties? | **No** | Zero user data is sold, rented, or transferred. |
 | Does the extension use data for creditworthiness or lending? | **No** | Not applicable. |
-| Does the extension collect browsing activity outside YouTube? | **No** | Manifest permissions and scripts are strictly restricted to `youtube.com/watch`. |
+| Does the extension collect browsing activity outside YouTube? | **No** | Manifest permissions and scripts are strictly restricted to `youtube.com/watch` and `yt2pdfs.com`. |
+
+---
+
+## 6. Step-by-Step Publishing Guide (Google Chrome Developer Dashboard)
+
+Follow these exact steps to publish the extension to the official Google Chrome Web Store:
+
+### Step 1: Open Chrome Developer Dashboard
+1. Open [chrome.google.com/webstore/devconsole](https://chrome.google.com/webstore/devconsole).
+2. Sign in with your Google Account.
+3. (If this is your first extension) Pay the one-time $5 developer registration fee required by Google.
+
+### Step 2: Upload the Extension ZIP
+1. In the top-right corner, click **"New Item"** (or **"Add new item"**).
+2. Drag and drop the ready-made package file:
+   📁 **`yt2pdf-slide-companion-v1.0.0.zip`** (located in the root of this project: `/Users/soumensen/Documents/YT2pdf/yt2pdf-slide-companion-v1.0.0.zip`).
+3. The dashboard will validate the manifest and open the store listing editor.
+
+### Step 3: Fill Out Store Listing
+Copy and paste the exact text from **Section 1 & 2** of this document:
+- **Product Name**: `YT2PDF Slide Companion`
+- **Summary**: `Capture presentation slides from YouTube videos and generate clean, high-resolution study PDFs on YT2PDFS.com.`
+- **Detailed Description**: Copy the entire text from **Section 2**.
+- **Category**: Select `Productivity` or `Education`.
+- **Language**: Select `English`.
+- **Homepage URL**: `https://yt2pdfs.com`
+- **Support URL**: `https://yt2pdfs.com/contact`
+
+### Step 4: Complete the Privacy Tab
+Click the **"Privacy"** tab on the left sidebar:
+1. **Single Purpose**: Paste the statement from **Section 4**.
+2. **Permission Justifications**:
+   - For `activeTab`: Paste from **Section 3**.
+   - For `tabs`: Paste from **Section 3**.
+   - For `storage`: Paste from **Section 3**.
+   - For `scripting`: Paste from **Section 3**.
+   - For `*://*.youtube.com/*`: Paste from **Section 3**.
+   - For `https://yt2pdfs.com/*`: Paste from **Section 3**.
+   - For `https://*.run.app/*`: Paste from **Section 3**.
+3. **Data Usage**:
+   - Check the box: *"I do not collect or transmit any user data"*.
+   - Check the certification: *"I certify that this extension complies with the Limited Use policy"*.
+4. **Privacy Policy**: Enter `https://yt2pdfs.com/privacy`.
+
+### Step 5: Distribution & Publish
+1. Click the **"Distribution"** tab on the left sidebar.
+2. Select **Visibility**: `Public`.
+3. Select **Regions**: `All regions`.
+4. Click **"Save draft"** (top right), then click **"Submit for Review"**!
+
+> **Review Time:** Google typically completes review and approval within 12–48 hours. Once approved, your extension is live worldwide on the Chrome Web Store at `https://chromewebstore.google.com/detail/yt2pdf-slide-companion/<your-extension-id>`.
