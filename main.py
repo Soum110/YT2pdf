@@ -41,6 +41,44 @@ executor = ThreadPoolExecutor(max_workers=3)
 app = FastAPI(title="YT2PDFS", version="1.0.0")
 
 
+def _ensure_pot_server():
+    """Starts the bgutil-pot HTTP server on 127.0.0.1:4416 if binary is present."""
+    import shutil
+    import subprocess
+    import urllib.request
+
+    bgutil_bin = shutil.which("bgutil-pot") or "/usr/local/bin/bgutil-pot"
+    if not os.path.exists(bgutil_bin) and not shutil.which("bgutil-pot"):
+        log.info("bgutil-pot binary not found; skipping POT server startup")
+        return
+
+    # Check if already running on port 4416
+    try:
+        req = urllib.request.Request("http://127.0.0.1:4416/ping")
+        with urllib.request.urlopen(req, timeout=0.8) as resp:
+            if resp.status == 200:
+                log.info("bgutil-pot server is already running on 127.0.0.1:4416")
+                return
+    except Exception:
+        pass
+
+    try:
+        proc = subprocess.Popen(
+            [bgutil_bin, "server", "--host", "127.0.0.1", "--port", "4416"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        log.info("Started bgutil-pot server (PID %d) on 127.0.0.1:4416", proc.pid)
+    except Exception as e:
+        log.warning("Failed to launch bgutil-pot server: %s", e)
+
+
+@app.on_event("startup")
+async def on_startup():
+    _ensure_pot_server()
+
+
 # ─────────────────────────────────────────────
 # Request / Response models
 # ─────────────────────────────────────────────
@@ -358,6 +396,7 @@ async def handle_contact_form(req: ContactRequest):
 
 @app.get("/api/health")
 async def health():
+    import shutil
     from pipeline import _normalize_netscape_cookies
     cookies_val = os.environ.get("YOUTUBE_COOKIES", "")
     cookie_file = Path("cookies.txt")
@@ -389,13 +428,24 @@ async def health():
         except Exception:
             pass
 
+    pot_server_running = False
+    try:
+        import urllib.request
+        with urllib.request.urlopen("http://127.0.0.1:4416/ping", timeout=0.5) as resp:
+            pot_server_running = (resp.status == 200)
+    except Exception:
+        pass
+
     return {
         "status": "ok",
-        "commit": "android-vr-v1",
+        "commit": "pot-deno-v1",
         "api_key_set": bool(GEMINI_API_KEY),
         "cookies_set": bool(cookies_val) or cookie_file.exists(),
         "cookies_source": cookies_source,
         "valid_cookies_count": valid_cookies_count,
+        "bgutil_available": bool(shutil.which("bgutil-pot") or os.path.exists("/usr/local/bin/bgutil-pot")),
+        "deno_available": bool(shutil.which("deno") or os.path.exists("/usr/local/bin/deno")),
+        "pot_server_running": pot_server_running,
     }
 
 
@@ -531,6 +581,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static_assets")
 # ─────────────────────────────────────────────
 if __name__ == "__main__":
     import uvicorn
+    _ensure_pot_server()
     port = int(os.environ.get("PORT", 8000))
     log.info("Starting YT2PDFS server on http://localhost:%d", port)
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)

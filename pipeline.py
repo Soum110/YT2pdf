@@ -127,7 +127,66 @@ def _normalize_netscape_cookies(text: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _build_ydl_opts_base(extra: dict = None) -> list[dict]:
+def _extract_video_id(url: str) -> Optional[str]:
+    """Extract 11-char YouTube video ID from various URL formats."""
+    import re
+    m = re.search(r"(?:v=|\/embed\/|\/shorts\/|\/v\/|youtu\.be\/|\/watch\?.*v=)([0-9A-Za-z_-]{11})", url)
+    return m.group(1) if m else None
+
+
+def _get_po_token(video_id: Optional[str] = None) -> Optional[str]:
+    """
+    Fetch or generate a genuine YouTube Proof-of-Origin (PO) Token.
+    Tries:
+      1. Local bgutil-pot HTTP server on 127.0.0.1:4416
+      2. Direct bgutil-pot CLI binary invocation
+    """
+    # 1. Try local bgutil HTTP server if running
+    try:
+        import urllib.request
+        payload = {}
+        if video_id:
+            payload["contentBinding"] = video_id
+        req = urllib.request.Request(
+            "http://127.0.0.1:4416/get_pot",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            if resp.status == 200:
+                data = json.loads(resp.read().decode("utf-8"))
+                tok = data.get("poToken") or data.get("po_token")
+                if tok:
+                    log.info("Obtained PO token from local bgutil-pot server for video %s", video_id)
+                    return tok
+    except Exception:
+        pass
+
+    # 2. Try CLI binary directly
+    bgutil_bin = shutil.which("bgutil-pot") or "/usr/local/bin/bgutil-pot"
+    if os.path.exists(bgutil_bin) or shutil.which("bgutil-pot"):
+        try:
+            cmd = [bgutil_bin]
+            if video_id:
+                cmd.extend(["-c", video_id])
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+            if res.returncode == 0 and res.stdout.strip():
+                for line in reversed(res.stdout.strip().splitlines()):
+                    line = line.strip()
+                    if line.startswith("{") and line.endswith("}"):
+                        data = json.loads(line)
+                        tok = data.get("poToken") or data.get("po_token")
+                        if tok:
+                            log.info("Generated PO token via bgutil-pot CLI for video %s", video_id)
+                            return tok
+        except Exception as e:
+            log.warning("CLI bgutil-pot execution failed: %s", e)
+
+    return None
+
+
+def _build_ydl_opts_base(extra: dict = None, video_id: Optional[str] = None) -> list[dict]:
     """
     Returns a list of yt-dlp option dicts to try in order.
     Uses a custom logger (never writes to stdout/stderr) to prevent
@@ -138,6 +197,8 @@ def _build_ydl_opts_base(extra: dict = None) -> list[dict]:
         "no_warnings": True,
         "noplaylist": True,
         "noprogress": True,
+        "socket_timeout": 20,
+        "source_address": "0.0.0.0",
     }
 
     # Support YouTube cookies to bypass cloud data-center anti-bot blocks
@@ -173,55 +234,71 @@ def _build_ydl_opts_base(extra: dict = None) -> list[dict]:
     base_no_cookies = dict(base)
     base_no_cookies.pop("cookiefile", None)
 
-    # 1. Top priority: android_vr client without cookies (bypasses bot checks on cloud datacenter IPs)
+    # Check if bgutil HTTP server is alive
+    pot_server_alive = False
+    try:
+        import urllib.request
+        with urllib.request.urlopen("http://127.0.0.1:4416/ping", timeout=0.5) as resp:
+            if resp.status == 200:
+                pot_server_alive = True
+    except Exception:
+        pass
+
+    # 1. Top priority: Web client with genuine BotGuard Proof-of-Origin (PO) Token
+    po_token = _get_po_token(video_id)
+    if po_token:
+        v_po = dict(base_no_cookies)
+        v_po["extractor_args"] = {
+            "youtube": {
+                "player_client": ["web", "default"],
+                "po_token": [f"web.gvs+{po_token}", f"web.player+{po_token}"],
+            }
+        }
+        if pot_server_alive:
+            v_po["extractor_args"]["youtubepot-bgutilhttp"] = {"base_url": ["http://127.0.0.1:4416"]}
+        v_po["logger"] = _YtdlpLogger()
+        variants.append(v_po)
+
+    # 2. Web client with bgutil plugin HTTP provider
+    if pot_server_alive:
+        v_plugin = dict(base_no_cookies)
+        v_plugin["extractor_args"] = {
+            "youtube": {"player_client": ["web", "default"]},
+            "youtubepot-bgutilhttp": {"base_url": ["http://127.0.0.1:4416"]},
+        }
+        v_plugin["logger"] = _YtdlpLogger()
+        variants.append(v_plugin)
+
+    # 3. android_vr client without cookies (proven bypass for datacenter IPs)
     v_vr = dict(base_no_cookies)
     v_vr["extractor_args"] = {"youtube": {"player_client": ["android_vr"]}}
     v_vr["logger"] = _YtdlpLogger()
     variants.append(v_vr)
 
-    # 2. android_vr with cookies (if authenticated or age-restricted)
-    if has_valid_cookies and "cookiefile" in base:
-        v_vr_c = dict(base)
-        v_vr_c["extractor_args"] = {"youtube": {"player_client": ["android_vr"]}}
-        v_vr_c["logger"] = _YtdlpLogger()
-        variants.append(v_vr_c)
-
-    # 3. Android client without cookies
+    # 4. Android client without cookies
     va = dict(base_no_cookies)
     va["extractor_args"] = {"youtube": {"player_client": ["android"]}}
     va["logger"] = _YtdlpLogger()
     variants.append(va)
 
-    # 4. If cookies are present, try web/mweb with cookies
+    # 5. Authenticated cookies variants (if cookies are provided)
     if has_valid_cookies and "cookiefile" in base:
-        # Default with cookies
-        v1 = dict(base)
-        v1["logger"] = _YtdlpLogger()
-        variants.append(v1)
+        v_c_vr = dict(base)
+        v_c_vr["extractor_args"] = {"youtube": {"player_client": ["android_vr"]}}
+        v_c_vr["logger"] = _YtdlpLogger()
+        variants.append(v_c_vr)
 
-        # Web client with cookies
-        v2 = dict(base)
-        v2["extractor_args"] = {"youtube": {"player_client": ["web"]}}
-        v2["logger"] = _YtdlpLogger()
-        variants.append(v2)
+        v_c_web = dict(base)
+        v_c_web["extractor_args"] = {"youtube": {"player_client": ["web"]}}
+        v_c_web["logger"] = _YtdlpLogger()
+        variants.append(v_c_web)
 
-        # mweb client with cookies
-        v3 = dict(base)
-        v3["extractor_args"] = {"youtube": {"player_client": ["mweb"]}}
-        v3["logger"] = _YtdlpLogger()
-        variants.append(v3)
+        v_c_mweb = dict(base)
+        v_c_mweb["extractor_args"] = {"youtube": {"player_client": ["mweb"]}}
+        v_c_mweb["logger"] = _YtdlpLogger()
+        variants.append(v_c_mweb)
 
-        # Chrome TLS impersonation with cookies
-        try:
-            import curl_cffi  # noqa
-            v4 = dict(base)
-            v4["impersonate"] = "chrome"
-            v4["logger"] = _YtdlpLogger()
-            variants.append(v4)
-        except Exception:
-            pass
-
-    # 5. Fallback without cookies
+    # 6. Fallback without cookies (mweb / default)
     vm = dict(base_no_cookies)
     vm["extractor_args"] = {"youtube": {"player_client": ["mweb"]}}
     vm["logger"] = _YtdlpLogger()
@@ -238,8 +315,9 @@ def _get_video_info(url: str) -> dict:
     """Fetch video title and duration without downloading."""
     import yt_dlp
 
+    video_id = _extract_video_id(url)
     all_errors = []
-    for opts in _build_ydl_opts_base({"skip_download": True}):
+    for opts in _build_ydl_opts_base({"skip_download": True}, video_id=video_id):
         client = opts.get("extractor_args", {}).get("youtube", {}).get("player_client", ["default"])[0]
         logger = opts.get("logger")
         try:
@@ -266,9 +344,8 @@ def _download_video(url: str, output_path: str, progress_hook: Optional[Callable
     """Download video to output_path using yt-dlp."""
     import yt_dlp
 
-    # Use our own progress hook that doesn't touch stdout
+    video_id = _extract_video_id(url)
     hooks = [progress_hook] if progress_hook else []
-
     format_str = "bestvideo[height<=720]/best[height<=720]/bestvideo/best"
 
     last_err = None
@@ -281,7 +358,7 @@ def _download_video(url: str, output_path: str, progress_hook: Optional[Callable
             "key": "FFmpegVideoConvertor",
             "preferedformat": "mp4",
         }] if shutil.which("ffmpeg") else [],
-    }):
+    }, video_id=video_id):
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 ydl.download([url])
