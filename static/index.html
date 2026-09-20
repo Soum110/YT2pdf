@@ -1112,47 +1112,65 @@
       font-size: 13px;
     }
 
-    /* ── Companion Banner & Modal Styles ── */
-    .btn-companion-nav {
+    /* ── Companion Status Dot Indicator (Header Nav) ── */
+    .companion-nav-indicator {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
       display: inline-flex;
       align-items: center;
-      gap: 7px;
-      padding: 6px 13px;
-      font-size: 12.5px;
-      font-weight: 600;
-      color: var(--ink);
-      background: rgba(255, 0, 0, 0.08);
-      border: 1px solid rgba(255, 0, 0, 0.22);
-      border-radius: 999px;
+      justify-content: center;
+      background: transparent;
+      border: 1px solid var(--hairline-soft);
       cursor: pointer;
-      transition: all 0.15s ease;
+      position: relative;
+      transition: all var(--tr);
+      padding: 0;
+      flex-shrink: 0;
     }
-    .btn-companion-nav:hover {
-      background: rgba(255, 0, 0, 0.15);
-      border-color: rgba(255, 0, 0, 0.35);
+    .companion-nav-indicator:hover {
+      background: var(--canvas-soft);
+      border-color: var(--hairline);
       transform: translateY(-1px);
     }
-    .btn-companion-nav.active-connected {
-      background: rgba(16, 185, 129, 0.1);
-      border-color: rgba(16, 185, 129, 0.35);
-      color: var(--ink);
-    }
-    .btn-companion-nav.active-connected:hover {
-      background: rgba(16, 185, 129, 0.18);
-      border-color: rgba(16, 185, 129, 0.5);
-    }
-    .companion-status-dot {
-      width: 7px;
-      height: 7px;
+    .companion-nav-dot {
+      width: 8px;
+      height: 8px;
       border-radius: 50%;
-      background: #10b981;
-      box-shadow: 0 0 6px #10b981;
       display: inline-block;
-      animation: companionPulse 2s infinite ease-in-out;
+      transition: all 0.3s ease;
     }
-    @keyframes companionPulse {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.55; transform: scale(0.85); }
+    /* Blinking Red when Extension is NOT Installed */
+    .companion-nav-indicator.status-uninstalled .companion-nav-dot {
+      background: #ef4444;
+      box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+      animation: navDotBlinkRed 1.8s infinite cubic-bezier(0.4, 0, 0.6, 1);
+    }
+    @keyframes navDotBlinkRed {
+      0%, 100% {
+        transform: scale(0.92);
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.8);
+      }
+      50% {
+        transform: scale(1.18);
+        box-shadow: 0 0 0 6px rgba(239, 68, 68, 0);
+      }
+    }
+    /* Blinking / Beeping Green when Extension IS Installed & Connected */
+    .companion-nav-indicator.status-installed .companion-nav-dot {
+      background: #10b981;
+      box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+      animation: navDotBlinkGreen 1.8s infinite cubic-bezier(0.4, 0, 0.6, 1);
+    }
+    @keyframes navDotBlinkGreen {
+      0%, 100% {
+        transform: scale(0.92);
+        box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.8);
+      }
+      50% {
+        transform: scale(1.18);
+        box-shadow: 0 0 0 6px rgba(16, 185, 129, 0);
+      }
     }
 
     /* ── Sleek Companion Panel & Integrated FAQs ── */
@@ -1419,7 +1437,6 @@
     }
 
     @media (max-width: 640px) {
-      .btn-companion-nav span { display: none; }
       .companion-panel-header { flex-direction: column; align-items: stretch; gap: 12px; }
       .companion-panel-lead { align-items: flex-start; }
       .btn-companion-action { width: 100%; justify-content: center; }
@@ -2242,15 +2259,8 @@
             <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
           </svg>
         </button>
-        <button class="btn-companion-nav" type="button" onclick="openCompanionModal()" title="Free 1-Click Chrome Companion Extension">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FF0000" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-            <polyline points="14 2 14 8 20 8"></polyline>
-            <line x1="16" y1="13" x2="8" y2="13"></line>
-            <line x1="16" y1="17" x2="8" y2="17"></line>
-            <polyline points="10 9 9 9 8 9"></polyline>
-          </svg>
-          <span>Chrome Extension</span>
+        <button class="companion-nav-indicator status-uninstalled" id="companion-nav-indicator" type="button" onclick="openCompanionModal()" title="Companion Extension Not Detected — Click to Install" aria-label="Companion Extension Status: Not Installed">
+          <span class="companion-nav-dot"></span>
         </button>
         <button class="btn-primary" type="button" onclick="document.getElementById('url-input').focus()">Extract</button>
       </div>
@@ -2848,14 +2858,12 @@
       const badge = document.getElementById("companion-active-badge");
       if (badge) badge.style.display = "inline-flex";
 
-      const navBtn = document.querySelector(".btn-companion-nav");
-      if (navBtn) {
-        navBtn.classList.add("active-connected");
-        navBtn.innerHTML = `
-          <span class="companion-status-dot"></span>
-          <span>Companion Active</span>
-        `;
-        navBtn.title = "Chrome Companion is connected (Silent background extraction enabled)";
+      const navIndicator = document.getElementById("companion-nav-indicator");
+      if (navIndicator) {
+        navIndicator.classList.remove("status-uninstalled");
+        navIndicator.classList.add("status-installed");
+        navIndicator.title = "Companion Extension Active & Connected (Silent background extraction ready)";
+        navIndicator.setAttribute("aria-label", "Companion extension status: Active and connected");
       }
 
       const stepBadge = document.querySelector(".companion-step-badge, .companion-badge-pill");
