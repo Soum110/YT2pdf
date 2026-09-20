@@ -63,13 +63,14 @@ def _ensure_pot_server():
         pass
 
     try:
+        log_file = open("/tmp/bgutil-server.log", "a")
         proc = subprocess.Popen(
-            [bgutil_bin, "server", "--host", "127.0.0.1", "--port", "4416"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            [bgutil_bin, "server", "--host", "0.0.0.0", "--port", "4416"],
+            stdout=log_file,
+            stderr=log_file,
             start_new_session=True,
         )
-        log.info("Started bgutil-pot server (PID %d) on 127.0.0.1:4416", proc.pid)
+        log.info("Started bgutil-pot server (PID %d) on 0.0.0.0:4416", proc.pid)
     except Exception as e:
         log.warning("Failed to launch bgutil-pot server: %s", e)
 
@@ -436,16 +437,52 @@ async def health():
     except Exception:
         pass
 
+    bgutil_diag = {}
+    bgutil_bin = shutil.which("bgutil-pot") or "/usr/local/bin/bgutil-pot"
+    if os.path.exists(bgutil_bin):
+        try:
+            import subprocess
+            r = subprocess.run([bgutil_bin, "--version"], capture_output=True, text=True, timeout=2)
+            bgutil_diag["version"] = r.stdout.strip() or r.stderr.strip()
+            bgutil_diag["returncode"] = r.returncode
+        except Exception as e:
+            bgutil_diag["error"] = str(e)
+    else:
+        bgutil_diag["found"] = False
+
+    deno_diag = {}
+    deno_bin = shutil.which("deno") or "/usr/local/bin/deno"
+    if os.path.exists(deno_bin):
+        try:
+            import subprocess
+            r = subprocess.run([deno_bin, "--version"], capture_output=True, text=True, timeout=2)
+            deno_diag["version"] = r.stdout.strip().splitlines()[0] if r.stdout else r.stderr.strip()
+            deno_diag["returncode"] = r.returncode
+        except Exception as e:
+            deno_diag["error"] = str(e)
+    else:
+        deno_diag["found"] = False
+
+    server_log = ""
+    if os.path.exists("/tmp/bgutil-server.log"):
+        try:
+            server_log = Path("/tmp/bgutil-server.log").read_text(encoding="utf-8", errors="ignore")[-500:]
+        except Exception:
+            pass
+
     return {
         "status": "ok",
-        "commit": "pot-deno-v1",
+        "commit": "pot-deno-v2",
         "api_key_set": bool(GEMINI_API_KEY),
         "cookies_set": bool(cookies_val) or cookie_file.exists(),
         "cookies_source": cookies_source,
         "valid_cookies_count": valid_cookies_count,
         "bgutil_available": bool(shutil.which("bgutil-pot") or os.path.exists("/usr/local/bin/bgutil-pot")),
+        "bgutil_diag": bgutil_diag,
         "deno_available": bool(shutil.which("deno") or os.path.exists("/usr/local/bin/deno")),
+        "deno_diag": deno_diag,
         "pot_server_running": pot_server_running,
+        "pot_server_log": server_log,
     }
 
 

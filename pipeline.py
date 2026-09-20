@@ -138,50 +138,52 @@ def _get_po_token(video_id: Optional[str] = None) -> Optional[str]:
     """
     Fetch or generate a genuine YouTube Proof-of-Origin (PO) Token.
     Tries:
-      1. Local bgutil-pot HTTP server on 127.0.0.1:4416
+      1. Local bgutil-pot HTTP server on 127.0.0.1:4416 (if /ping responds)
       2. Direct bgutil-pot CLI binary invocation
     """
     # 1. Try local bgutil HTTP server if running
     try:
         import urllib.request
-        payload = {}
-        if video_id:
-            payload["contentBinding"] = video_id
-        req = urllib.request.Request(
-            "http://127.0.0.1:4416/get_pot",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=4) as resp:
-            if resp.status == 200:
-                data = json.loads(resp.read().decode("utf-8"))
-                tok = data.get("poToken") or data.get("po_token")
-                if tok:
-                    log.info("Obtained PO token from local bgutil-pot server for video %s", video_id)
-                    return tok
+        with urllib.request.urlopen("http://127.0.0.1:4416/ping", timeout=0.3) as r:
+            if r.status == 200:
+                payload = {}
+                if video_id:
+                    payload["contentBinding"] = video_id
+                req = urllib.request.Request(
+                    "http://127.0.0.1:4416/get_pot",
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=3) as resp:
+                    if resp.status == 200:
+                        data = json.loads(resp.read().decode("utf-8"))
+                        tok = data.get("poToken") or data.get("po_token")
+                        if tok:
+                            log.info("Obtained PO token from local bgutil-pot server for video %s", video_id)
+                            return tok
     except Exception:
         pass
 
     # 2. Try CLI binary directly
     bgutil_bin = shutil.which("bgutil-pot") or "/usr/local/bin/bgutil-pot"
     if os.path.exists(bgutil_bin) or shutil.which("bgutil-pot"):
-        try:
-            cmd = [bgutil_bin]
-            if video_id:
-                cmd.extend(["-c", video_id])
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-            if res.returncode == 0 and res.stdout.strip():
-                for line in reversed(res.stdout.strip().splitlines()):
-                    line = line.strip()
-                    if line.startswith("{") and line.endswith("}"):
-                        data = json.loads(line)
-                        tok = data.get("poToken") or data.get("po_token")
-                        if tok:
-                            log.info("Generated PO token via bgutil-pot CLI for video %s", video_id)
-                            return tok
-        except Exception as e:
-            log.warning("CLI bgutil-pot execution failed: %s", e)
+        flag_candidates = [["--content-binding", video_id], ["-c", video_id]] if video_id else [[]]
+        for flags in flag_candidates:
+            try:
+                cmd = [bgutil_bin] + flags
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+                if res.returncode == 0 and res.stdout.strip():
+                    for line in reversed(res.stdout.strip().splitlines()):
+                        line = line.strip()
+                        if line.startswith("{") and line.endswith("}"):
+                            data = json.loads(line)
+                            tok = data.get("poToken") or data.get("po_token")
+                            if tok:
+                                log.info("Generated PO token via bgutil-pot CLI for video %s", video_id)
+                                return tok
+            except Exception as e:
+                log.debug("CLI bgutil-pot attempt with %s failed: %s", flags, e)
 
     return None
 
@@ -234,16 +236,6 @@ def _build_ydl_opts_base(extra: dict = None, video_id: Optional[str] = None) -> 
     base_no_cookies = dict(base)
     base_no_cookies.pop("cookiefile", None)
 
-    # Check if bgutil HTTP server is alive
-    pot_server_alive = False
-    try:
-        import urllib.request
-        with urllib.request.urlopen("http://127.0.0.1:4416/ping", timeout=0.5) as resp:
-            if resp.status == 200:
-                pot_server_alive = True
-    except Exception:
-        pass
-
     # 1. Top priority: Web client with genuine BotGuard Proof-of-Origin (PO) Token
     po_token = _get_po_token(video_id)
     if po_token:
@@ -254,34 +246,22 @@ def _build_ydl_opts_base(extra: dict = None, video_id: Optional[str] = None) -> 
                 "po_token": [f"web.gvs+{po_token}", f"web.player+{po_token}"],
             }
         }
-        if pot_server_alive:
-            v_po["extractor_args"]["youtubepot-bgutilhttp"] = {"base_url": ["http://127.0.0.1:4416"]}
         v_po["logger"] = _YtdlpLogger()
         variants.append(v_po)
 
-    # 2. Web client with bgutil plugin HTTP provider
-    if pot_server_alive:
-        v_plugin = dict(base_no_cookies)
-        v_plugin["extractor_args"] = {
-            "youtube": {"player_client": ["web", "default"]},
-            "youtubepot-bgutilhttp": {"base_url": ["http://127.0.0.1:4416"]},
-        }
-        v_plugin["logger"] = _YtdlpLogger()
-        variants.append(v_plugin)
-
-    # 3. android_vr client without cookies (proven bypass for datacenter IPs)
+    # 2. android_vr client without cookies (proven bypass for datacenter IPs)
     v_vr = dict(base_no_cookies)
     v_vr["extractor_args"] = {"youtube": {"player_client": ["android_vr"]}}
     v_vr["logger"] = _YtdlpLogger()
     variants.append(v_vr)
 
-    # 4. Android client without cookies
+    # 3. Android client without cookies
     va = dict(base_no_cookies)
     va["extractor_args"] = {"youtube": {"player_client": ["android"]}}
     va["logger"] = _YtdlpLogger()
     variants.append(va)
 
-    # 5. Authenticated cookies variants (if cookies are provided)
+    # 4. Authenticated cookies variants (if cookies are provided)
     if has_valid_cookies and "cookiefile" in base:
         v_c_vr = dict(base)
         v_c_vr["extractor_args"] = {"youtube": {"player_client": ["android_vr"]}}
@@ -298,7 +278,7 @@ def _build_ydl_opts_base(extra: dict = None, video_id: Optional[str] = None) -> 
         v_c_mweb["logger"] = _YtdlpLogger()
         variants.append(v_c_mweb)
 
-    # 6. Fallback without cookies (mweb / default)
+    # 5. Fallback without cookies (mweb / default)
     vm = dict(base_no_cookies)
     vm["extractor_args"] = {"youtube": {"player_client": ["mweb"]}}
     vm["logger"] = _YtdlpLogger()
