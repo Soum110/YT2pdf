@@ -783,6 +783,11 @@
       font-weight: 600;
       color: var(--ink);
     }
+    .guide-features span {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
 
     .btn-download-guide {
       background-color: var(--primary);
@@ -1205,18 +1210,44 @@
     .companion-badge-pill {
       font-size: 10.5px;
       font-weight: 600;
-      padding: 2px 7px;
+      padding: 2.5px 8px;
       border-radius: 999px;
-      background: rgba(0, 102, 255, 0.1);
+      background: rgba(0, 102, 255, 0.08);
       color: var(--accent);
       border: 1px solid rgba(0, 102, 255, 0.2);
       letter-spacing: 0.2px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5.5px;
       transition: all var(--tr);
     }
     .companion-badge-pill.is-active {
-      background: rgba(16, 185, 129, 0.12);
+      background: rgba(16, 185, 129, 0.08);
       color: #10b981;
       border-color: rgba(16, 185, 129, 0.28);
+    }
+    .companion-pulse-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #10b981;
+      display: inline-block;
+      box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.6);
+      animation: companionPulseGlow 2s infinite ease-in-out;
+    }
+    @keyframes companionPulseGlow {
+      0% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+      }
+      70% {
+        transform: scale(1.05);
+        box-shadow: 0 0 0 5px rgba(16, 185, 129, 0);
+      }
+      100% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+      }
     }
     .companion-lead-subtitle {
       font-size: 12.5px;
@@ -1246,9 +1277,14 @@
       transform: translateY(-1px);
     }
     .btn-companion-action.is-active {
-      background: rgba(16, 185, 129, 0.1);
+      background: rgba(16, 185, 129, 0.08);
       color: #10b981;
-      border-color: rgba(16, 185, 129, 0.28);
+      border-color: rgba(16, 185, 129, 0.32);
+      box-shadow: 0 1px 3px rgba(16, 185, 129, 0.08);
+    }
+    .btn-companion-action.is-active:hover {
+      background: rgba(16, 185, 129, 0.14);
+      border-color: rgba(16, 185, 129, 0.45);
     }
     .companion-qa-group {
       display: flex;
@@ -2442,10 +2478,10 @@
             Complete academic textbook chapter with full mathematical derivations, LaTeX formulas, problem sets, and key lecture diagrams.
           </p>
           <div class="guide-features">
-            <span>✓ 6 Chapters</span>
-            <span>✓ Slide Formulas</span>
-            <span>✓ Solved Problems</span>
-            <span>✓ Formula Sheet</span>
+            <span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> 6 Chapters</span>
+            <span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> Slide Formulas</span>
+            <span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> Solved Problems</span>
+            <span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> Formula Sheet</span>
           </div>
         </div>
         <button class="btn-download-guide" id="dl-guide-btn" onclick="downloadGuide()">
@@ -2479,9 +2515,12 @@
         <div class="studio-status-strip">
           <div class="studio-counter">
             Selected <strong id="curation-selected-count">0</strong> of <span id="curation-total-count">0</span> slides
-            <span style="margin-left:8px;font-size:11.5px;color:var(--text-muted);">(Click card to toggle • 🔍 to zoom • 🗑️ to delete)</span>
+            <span style="margin-left:8px;font-size:11.5px;color:var(--text-muted);">(Click card to toggle • Click image to preview • Discard to remove)</span>
           </div>
-          <span id="curation-msg" style="color:var(--ink);font-weight:600;display:none;">✓ Slides PDF updated!</span>
+          <span id="curation-msg" style="color:var(--ink);font-weight:600;display:none;align-items:center;gap:4px;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            <span>Slides PDF updated!</span>
+          </span>
         </div>
 
         <div id="slides-grid-container" class="slides-grid">
@@ -2823,7 +2862,7 @@
       const installText = document.querySelector(".companion-install-text, .companion-lead-subtitle");
       const installBtn = document.querySelector(".companion-install-btn, .btn-companion-action");
       if (stepBadge) {
-        stepBadge.textContent = "⚡ Active";
+        stepBadge.innerHTML = `<span class="companion-pulse-dot"></span><span>Active</span>`;
         stepBadge.classList.add("is-active");
       }
       if (installText) {
@@ -2832,8 +2871,8 @@
       if (installBtn) {
         installBtn.classList.add("is-active");
         installBtn.innerHTML = `
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-          <span>Connected ✓</span>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          <span>Connected</span>
         `;
       }
     }
@@ -3240,8 +3279,9 @@
         alert("Error compiling slides PDF: " + (data.detail || "Unknown error"));
         return;
       }
-      msg.textContent = `✓ Slides PDF compiled (${data.slide_count} slides)!`;
-      msg.style.display = "inline";
+      msg.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:5px;"><polyline points="20 6 9 17 4 12"></polyline></svg>Slides PDF compiled (${data.slide_count} slides)!`;
+      msg.style.display = "inline-flex";
+      msg.style.alignItems = "center";
       
       dlBtn.style.display = "inline-flex";
       dlBtn.innerHTML = `<span>Download Slides PDF (${data.slide_count})</span>`;
@@ -3345,15 +3385,24 @@
       guideBtn.disabled = false;
       guideBtn.style.opacity = "1";
       guideBtn.style.cursor = "pointer";
+      if (guideDesc) {
+        if (outputs.has_transcript) {
+          guideDesc.innerHTML = `Complete academic textbook chapter with full mathematical derivations, LaTeX formulas, problem sets, and key lecture diagrams.`;
+        } else {
+          guideDesc.innerHTML = `Complete academic textbook chapter synthesized directly from in-depth slide formulas, derivations, problem sets, and technical diagrams.`;
+        }
+      }
+      const subLabel = guideBtn.querySelector(".sub-label");
+      if (subLabel) subLabel.textContent = "Full Academic Chapter (PDF)";
     } else {
       guideBtn.disabled = true;
       guideBtn.style.opacity = "0.45";
       guideBtn.style.cursor = "not-allowed";
       if (guideDesc) {
-        guideDesc.innerHTML = `<span style="color:var(--text-muted);">No spoken transcript was found on this video to generate written textbook notes. Your full <strong>Presentation Slides PDF</strong> is ready for download below!</span>`;
+        guideDesc.innerHTML = `<span style="color:var(--text-muted);">Study guide generation is currently unavailable. Your full <strong>Presentation Slides PDF</strong> is ready for download below!</span>`;
       }
       const subLabel = guideBtn.querySelector(".sub-label");
-      if (subLabel) subLabel.textContent = "Not Available (No Transcript)";
+      if (subLabel) subLabel.textContent = "Not Available";
     }
 
     loadSlidePreview(jobId);

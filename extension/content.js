@@ -81,6 +81,160 @@
   }
 
   // ─────────────────────────────────────────────
+  // Client-Side YouTube Caption / Transcript Extraction
+  // ─────────────────────────────────────────────
+  async function extractTranscriptFromPage() {
+    try {
+      console.log("[YT2PDF Companion] Detecting captions from YouTube browser session...");
+      let captionTracks = null;
+
+      // Strategy 1: Look for captionTracks in DOM <script> tags
+      const scripts = document.querySelectorAll("script");
+      for (const s of scripts) {
+        const txt = s.textContent || "";
+        if (txt.includes("captionTracks")) {
+          const match = txt.match(/"captionTracks":\s*(\[.+?\])/);
+          if (match) {
+            try {
+              const parsed = JSON.parse(match[1]);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                captionTracks = parsed;
+                break;
+              }
+            } catch (e) {}
+          }
+        }
+      }
+
+      // Strategy 2: Query main-world player or window.ytInitialPlayerResponse via quick event
+      if (!captionTracks || captionTracks.length === 0) {
+        captionTracks = await new Promise((resolve) => {
+          const eventHandler = (e) => {
+            window.removeEventListener("yt2pdf_tracks_reply", eventHandler);
+            resolve(e.detail?.tracks || null);
+          };
+          window.addEventListener("yt2pdf_tracks_reply", eventHandler);
+          setTimeout(() => {
+            window.removeEventListener("yt2pdf_tracks_reply", eventHandler);
+            resolve(null);
+          }, 800);
+
+          const scriptEl = document.createElement("script");
+          scriptEl.textContent = `
+            (() => {
+              try {
+                let tracks = null;
+                const player = document.getElementById("movie_player");
+                if (player && typeof player.getOption === "function") {
+                  tracks = player.getOption("captions", "tracklist");
+                }
+                if (!tracks && window.ytInitialPlayerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks) {
+                  tracks = window.ytInitialPlayerResponse.captions.playerCaptionsTracklistRenderer.captionTracks;
+                }
+                window.dispatchEvent(new CustomEvent("yt2pdf_tracks_reply", { detail: { tracks: tracks || null } }));
+              } catch (err) {
+                window.dispatchEvent(new CustomEvent("yt2pdf_tracks_reply", { detail: { tracks: null } }));
+              }
+            })();
+          `;
+          (document.head || document.documentElement).appendChild(scriptEl);
+          scriptEl.remove();
+        });
+      }
+
+      if (!captionTracks || captionTracks.length === 0) {
+        console.log("[YT2PDF Companion] No caption tracks detected on page.");
+        return [];
+      }
+
+      console.log(`[YT2PDF Companion] Found ${captionTracks.length} caption tracks. Selecting optimal language track...`);
+
+      // Priority: English manual > English auto (asr) > non-auto track > any track
+      let chosen = captionTracks.find(t => (t.languageCode === "en" || t.languageCode?.startsWith("en")) && t.kind !== "asr");
+      if (!chosen) {
+        chosen = captionTracks.find(t => t.languageCode === "en" || t.languageCode?.startsWith("en"));
+      }
+      if (!chosen) {
+        chosen = captionTracks.find(t => t.kind !== "asr");
+      }
+      if (!chosen) {
+        chosen = captionTracks[0];
+      }
+
+      if (!chosen || !chosen.baseUrl) {
+        return [];
+      }
+
+      console.log(`[YT2PDF Companion] Selected caption track: ${chosen.languageCode} (${chosen.kind || "manual"}). Fetching timedtext...`);
+
+      let segments = [];
+
+      // Try fmt=json3 format first
+      try {
+        const jsonUrl = chosen.baseUrl + (chosen.baseUrl.includes("?") ? "&" : "?") + "fmt=json3";
+        const res = await fetch(jsonUrl, { credentials: "include" });
+        if (res.ok) {
+          const raw = await res.text();
+          if (raw && raw.trim().startsWith("{")) {
+            const data = JSON.parse(raw);
+            if (data.events && Array.isArray(data.events)) {
+              for (const ev of data.events) {
+                const s = (ev.tStartMs || 0) / 1000.0;
+                const d = (ev.dDurationMs || 0) / 1000.0;
+                const txt = (ev.segs || []).map(x => x.utf8 || "").join("").trim();
+                if (txt && txt !== "\n") {
+                  segments.push([s, s + d, txt]);
+                }
+              }
+            }
+          }
+        }
+      } catch (jsonErr) {
+        console.warn("[YT2PDF Companion] json3 timedtext fetch error:", jsonErr);
+      }
+
+      // Fallback: XML timedtext if json3 yielded no segments
+      if (segments.length === 0) {
+        try {
+          const res = await fetch(chosen.baseUrl, { credentials: "include" });
+          if (res.ok) {
+            const xml = await res.text();
+            if (xml && xml.includes("<text")) {
+              const parser = new DOMParser();
+              const xmlDoc = parser.parseFromString(xml, "text/xml");
+              const textNodes = xmlDoc.getElementsByTagName("text");
+              for (let i = 0; i < textNodes.length; i++) {
+                const node = textNodes[i];
+                const s = parseFloat(node.getAttribute("start") || "0");
+                const d = parseFloat(node.getAttribute("dur") || "0");
+                const raw = (node.textContent || "")
+                  .replace(/&#39;/g, "'")
+                  .replace(/&quot;/g, '"')
+                  .replace(/&amp;/g, '&')
+                  .replace(/&lt;/g, '<')
+                  .replace(/&gt;/g, '>')
+                  .trim();
+                if (raw) {
+                  segments.push([s, s + d, raw]);
+                }
+              }
+            }
+          }
+        } catch (xmlErr) {
+          console.warn("[YT2PDF Companion] XML timedtext fetch error:", xmlErr);
+        }
+      }
+
+      console.log(`[YT2PDF Companion] Successfully extracted ${segments.length} transcript segments from browser.`);
+      return segments;
+
+    } catch (err) {
+      console.warn("[YT2PDF Companion] Extract transcript failed:", err);
+      return [];
+    }
+  }
+
+  // ─────────────────────────────────────────────
   // Extension Context & Direct Transmission Resilience
   // ─────────────────────────────────────────────
   function isExtensionContextValid() {
@@ -307,11 +461,19 @@
 
       console.log(`[YT2PDF Companion] Silent extraction complete (${capturedSlides.length} slides). Transmitting...`);
 
+      let transcriptSegments = [];
+      try {
+        transcriptSegments = await extractTranscriptFromPage();
+      } catch (trErr) {
+        console.warn("[YT2PDF Companion] Silent transcript extraction error:", trErr);
+      }
+
       const payload = {
         video_url: cleanUrl,
         title: videoTitle,
         duration: duration,
-        frames: capturedSlides
+        frames: capturedSlides,
+        transcript: transcriptSegments
       };
 
       safeSendRuntimeMessage({
@@ -465,11 +627,19 @@
         <span>Uploading...</span>
       `;
 
+      let transcriptSegments = [];
+      try {
+        transcriptSegments = await extractTranscriptFromPage();
+      } catch (trErr) {
+        console.warn("[YT2PDF Companion] Manual transcript extraction error:", trErr);
+      }
+
       const payload = {
         video_url: videoUrl,
         title: videoTitle,
         duration: duration,
-        frames: capturedSlides
+        frames: capturedSlides,
+        transcript: transcriptSegments
       };
 
       // Upload frames: Safe multi-strategy upload (background worker with direct HTTP fallback)

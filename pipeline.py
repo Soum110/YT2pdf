@@ -590,6 +590,7 @@ def run_pipeline(job_id: str, video_url: str, jobs_root: Path, gemini_api_key: s
         (job_dir / "outputs.json").write_text(json.dumps({
             "slides_pdf": True,
             "study_guide_pdf": guide_ready,
+            "has_transcript": bool(transcript_segments),
             "slide_count": len(verified),
         }))
 
@@ -623,6 +624,7 @@ def run_pipeline_from_frames(
     duration: float,
     jobs_root: Path,
     gemini_api_key: str,
+    client_transcript: Optional[list] = None,
 ):
     """
     Orchestration pipeline for client-captured frames (YT2PDF Slide Companion Extension).
@@ -729,18 +731,30 @@ def run_pipeline_from_frames(
         )
         log.info("[%s] Slides PDF ready: %s", job_id, slides_pdf_path)
 
-        # Optional: Transcript & Study guide
+        # Transcript & Study guide (Guaranteed Generation)
         guide_ready = False
-        try:
-            from transcript_fetcher import fetch_transcript
-            transcript_tmp = tempfile.mkdtemp(prefix=f"yt2pdf_tr_{job_id}_")
+        transcript_segments = client_transcript or []
+        if not transcript_segments:
             try:
-                transcript_segments = fetch_transcript(video_url, tmp_dir=transcript_tmp)
-            finally:
-                shutil.rmtree(transcript_tmp, ignore_errors=True)
+                from transcript_fetcher import fetch_transcript
+                transcript_tmp = tempfile.mkdtemp(prefix=f"yt2pdf_tr_{job_id}_")
+                try:
+                    transcript_segments = fetch_transcript(video_url, tmp_dir=transcript_tmp)
+                finally:
+                    shutil.rmtree(transcript_tmp, ignore_errors=True)
+            except Exception as tr_err:
+                log.warning("[%s] Server transcript fetch failed: %s", job_id, tr_err)
+                transcript_segments = []
 
-            if transcript_segments and gemini_api_key and gemini_api_key != "YOUR_GEMINI_API_KEY_HERE":
-                _write_status(job_dir, "generating_guide", 88, f"AI writing study guide for {len(verified)} slides...")
+        if gemini_api_key and gemini_api_key != "YOUR_GEMINI_API_KEY_HERE":
+            try:
+                if transcript_segments:
+                    log.info("[%s] Generating study guide with %d transcript segments...", job_id, len(transcript_segments))
+                    _write_status(job_dir, "generating_guide", 88, f"AI writing study guide with lecture transcript for {len(verified)} slides...")
+                else:
+                    log.info("[%s] No audio captions detected; generating study guide directly from slide visual formulas & diagrams...", job_id)
+                    _write_status(job_dir, "generating_guide", 88, f"AI synthesizing study guide from slide formulas & diagrams ({len(verified)} slides)...")
+
                 from study_guide_generator import generate_study_guide_content
                 crops_dir = job_dir / "diagram_crops"
                 crops_dir.mkdir(parents=True, exist_ok=True)
@@ -760,8 +774,9 @@ def run_pipeline_from_frames(
                     video_title=video_title,
                 )
                 guide_ready = True
-        except Exception as guide_err:
-            log.warning("[%s] Optional study guide generation skipped/failed: %s", job_id, guide_err)
+                log.info("[%s] Study guide PDF ready: %s", job_id, guide_pdf_path)
+            except Exception as guide_err:
+                log.warning("[%s] Study guide generation failed: %s", job_id, guide_err)
 
         # Cleanup raw frames
         shutil.rmtree(raw_frames_dir, ignore_errors=True)
@@ -776,6 +791,7 @@ def run_pipeline_from_frames(
         (job_dir / "outputs.json").write_text(json.dumps({
             "slides_pdf": True,
             "study_guide_pdf": guide_ready,
+            "has_transcript": bool(transcript_segments),
             "slide_count": len(verified),
         }))
 

@@ -639,7 +639,8 @@ def generate_study_guide_content(
 
     # 4. Generate targeted programmatic simulations (Max 2 per video)
     log.info("Phase 3: Generating curated technical simulations...")
-    curated_sims = _generate_curated_simulations(client, gemini_model, full_transcript, "Lecture", crops_dir)
+    sim_context = full_transcript if full_transcript else slide_formula_catalog[:3000]
+    curated_sims = _generate_curated_simulations(client, gemini_model, sim_context, "Lecture", crops_dir)
     all_figures = curated_diagrams + curated_sims
     log.info("Total curated visual assets for lecture: %d (%d diagrams, %d simulations)",
              len(all_figures), len(curated_diagrams), len(curated_sims))
@@ -654,6 +655,12 @@ def generate_study_guide_content(
         for f in all_figures
     )
 
+    transcript_section = (
+        full_transcript[:22000]
+        if full_transcript
+        else "No spoken audio transcript was available for this video. Author an exhaustive, rigorous academic textbook chapter synthesizing and proving all principles, definitions, equations, and worked exemplar problems directly from the mathematical slide catalog above."
+    )
+
     user_prompt = f"""LECTURE METADATA:
 Duration: {duration_str}
 Total Slide Frames: {len(slides)}
@@ -666,9 +673,9 @@ MATHEMATICAL FORMULAS & CONTENT EXTRACTED DIRECTLY FROM THE SLIDES:
 CURATED VISUAL ASSETS AVAILABLE FOR THIS LECTURE:
 {fig_descriptions if fig_descriptions else "No visual figures extracted."}
 
-FULL LECTURE AUDIO TRANSCRIPT:
+LECTURE AUDIO TRANSCRIPT / PEDAGOGICAL CONTEXT:
 --- TRANSCRIPT BEGIN ---
-{full_transcript[:22000]}
+{transcript_section}
 --- TRANSCRIPT END ---
 
 Please author the complete, self-contained textbook chapter progressing chronologically from basic foundations to advanced university-level mathematics.

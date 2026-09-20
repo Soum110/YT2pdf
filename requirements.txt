@@ -14,3 +14,4 @@ gradio>=4.44.0
 google-api-python-client>=2.100.0
 google-auth-httplib2>=0.2.0
 google-auth-oauthlib>=1.2.0
+youtube-transcript-api>=0.6.2

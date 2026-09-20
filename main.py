@@ -185,6 +185,7 @@ class CompanionUploadRequest(BaseModel):
     title: str = "Presentation Slides"
     duration: Optional[float] = 0.0
     frames: list[CompanionFrame]
+    transcript: Optional[list] = None
 
 
 class RebuildSlidesRequest(BaseModel):
@@ -292,6 +293,7 @@ async def upload_companion_frames(req: CompanionUploadRequest):
         duration=req.duration or 0.0,
         jobs_root=JOBS_ROOT,
         gemini_api_key=GEMINI_API_KEY,
+        client_transcript=req.transcript,
     )
 
     log.info("Companion job %s started for %s with %d frames", job_id, req.video_url, len(req.frames))

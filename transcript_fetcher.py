@@ -101,6 +101,11 @@ class _SilentLogger:
     def error(self, msg):   log.error("yt-dlp(caption): %s", msg)
 
 
+def _extract_video_id(url: str) -> Optional[str]:
+    m = re.search(r'(?:v=|\/embed\/|youtu\.be\/|\/v\/|\/e\/|watch\?v=|\&v=)([a-zA-Z0-9_-]{11})', url)
+    return m.group(1) if m else None
+
+
 def fetch_transcript(
     url: str,
     tmp_dir: Optional[str] = None,
@@ -108,16 +113,46 @@ def fetch_transcript(
 ) -> list[tuple[float, float, str]]:
     """
     Download YouTube captions for `url` and return parsed segments.
+    Uses multi-strategy approach:
+      1. youtube-transcript-api (if available)
+      2. yt-dlp with cookies + PO-token + multi-client fallback (web, android, ios)
 
     Returns:
         List of (start_sec, end_sec, text) tuples, sorted by time.
         Empty list if no captions are available.
-
-    Args:
-        url:     YouTube (or other) video URL.
-        tmp_dir: Where to save subtitle files. Uses tempfile if None.
-        lang:    Preferred caption language code (default 'en').
     """
+    vid_id = _extract_video_id(url)
+
+    # ── Strategy 1: youtube-transcript-api (direct Innertube timedtext) ────
+    if vid_id:
+        try:
+            from youtube_transcript_api import YouTubeTranscriptApi
+            transcript_list = YouTubeTranscriptApi.list_transcripts(vid_id)
+            transcript = None
+            try:
+                transcript = transcript_list.find_transcript([lang, f"{lang}-US", "en", "en-US", "en-orig"])
+            except Exception:
+                # Fallback to any transcript or auto-generated
+                for t in transcript_list:
+                    transcript = t
+                    break
+
+            if transcript:
+                raw_data = transcript.fetch()
+                segments = []
+                for item in raw_data:
+                    txt = (item.get("text") or "").strip()
+                    if txt:
+                        start_s = float(item.get("start", 0))
+                        dur_s = float(item.get("duration", 0))
+                        segments.append((start_s, start_s + dur_s, txt))
+                if segments:
+                    log.info("Fetched %d segments via youtube-transcript-api for %s", len(segments), vid_id)
+                    return segments
+        except Exception as api_err:
+            log.debug("youtube-transcript-api attempt for %s failed: %s", vid_id, api_err)
+
+    # ── Strategy 2: yt-dlp with multiple player clients & tokens ───────────
     import yt_dlp
 
     own_tmp = tmp_dir is None
@@ -125,42 +160,61 @@ def fetch_transcript(
         tmp_dir = tempfile.mkdtemp(prefix="yt2pdf_transcript_")
 
     out_template = os.path.join(tmp_dir, "caption")
+    cookie_file = "cookies.txt" if os.path.exists("cookies.txt") else None
 
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
-        "noprogress": True,
-        "logger": _SilentLogger(),
-        "skip_download": True,
-        "writesubtitles": True,
-        "writeautomaticsub": True,
-        "subtitleslangs": [lang, f"{lang}-*", "en", "en-*"],
-        "subtitlesformat": "vtt",
-        "outtmpl": out_template,
-        "extractor_args": {"youtube": {"player_client": ["android"]}},
-    }
+    # Retrieve PO token if server is active
+    po_token = None
+    if vid_id:
+        try:
+            from pipeline import get_po_token
+            po_token = get_po_token(vid_id)
+        except Exception:
+            pass
+
+    client_candidates = [
+        {"youtube": {"player_client": ["web"]}},
+        {"youtube": {"player_client": ["android"]}},
+        {"youtube": {"player_client": ["ios", "mweb"]}},
+    ]
 
     vtt_text = None
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
+    for client_arg in client_candidates:
+        ydl_opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "noplaylist": True,
+            "noprogress": True,
+            "logger": _SilentLogger(),
+            "skip_download": True,
+            "writesubtitles": True,
+            "writeautomaticsub": True,
+            "subtitleslangs": [lang, f"{lang}-*", "en", "en-*", "en-orig", "all"],
+            "subtitlesformat": "vtt",
+            "outtmpl": out_template,
+            "extractor_args": client_arg,
+        }
+        if cookie_file:
+            ydl_opts["cookiefile"] = cookie_file
+        if po_token:
+            ydl_opts["extractor_args"].setdefault("youtube", {})["po_token"] = [f"web+{po_token}"]
 
-        # Find any .vtt file that was written
-        vtt_files = list(Path(tmp_dir).glob("caption*.vtt"))
-        if not vtt_files:
-            # Also check for .en.vtt, .en-US.vtt etc.
-            vtt_files = list(Path(tmp_dir).glob("*.vtt"))
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
 
-        if vtt_files:
-            # Prefer manual subtitles over auto-generated ones
-            manual = [f for f in vtt_files if ".auto." not in f.name and "-orig" not in f.name]
-            chosen = manual[0] if manual else vtt_files[0]
-            log.info("Using captions file: %s", chosen.name)
-            vtt_text = chosen.read_text(encoding="utf-8", errors="replace")
+            vtt_files = list(Path(tmp_dir).glob("caption*.vtt"))
+            if not vtt_files:
+                vtt_files = list(Path(tmp_dir).glob("*.vtt"))
 
-    except Exception as e:
-        log.warning("Caption download failed: %s", e)
+            if vtt_files:
+                manual = [f for f in vtt_files if ".auto." not in f.name and "-orig" not in f.name]
+                chosen = manual[0] if manual else vtt_files[0]
+                log.info("Using captions file via yt-dlp: %s", chosen.name)
+                vtt_text = chosen.read_text(encoding="utf-8", errors="replace")
+                if vtt_text:
+                    break
+        except Exception as e:
+            log.debug("yt-dlp caption attempt with %s failed: %s", client_arg, e)
 
     if vtt_text is None:
         log.warning("No captions found for this video. Study guide will use slide analysis only.")
