@@ -2104,19 +2104,23 @@
 
     <!-- Results Section -->
     <div id="result-section">
-      <div class="result-banner">
+      <div class="result-banner" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
         <div class="result-banner-title">Lecture materials ready.</div>
+        <button class="btn-primary" id="banner-dl-slides-btn" type="button" onclick="downloadSlides()" style="padding:10px 22px;font-size:14px;font-weight:600;display:inline-flex;align-items:center;gap:8px;background:#FF0000;color:#FFFFFF;border:none;border-radius:10px;cursor:pointer;box-shadow:0 4px 14px rgba(255,0,0,0.35);">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+          <span id="banner-dl-text">Download Slides PDF</span>
+        </button>
       </div>
 
       <!-- Deliverable 1: AI Comprehensive Study Guide -->
-      <div class="study-guide-card">
+      <div class="study-guide-card" id="study-guide-container">
         <div class="guide-copy">
           <div class="guide-tag-row">
             <span class="badge-popular">Basic → Advanced</span>
             <span style="font-size:12px;font-weight:600;color:var(--ink);">Academic Chapter</span>
           </div>
           <h2 class="guide-heading">Comprehensive Study Guide</h2>
-          <p class="guide-desc">
+          <p class="guide-desc" id="guide-desc-text">
             Complete academic textbook chapter with full mathematical derivations, LaTeX formulas, problem sets, and key lecture diagrams.
           </p>
           <div class="guide-features">
@@ -2144,11 +2148,12 @@
           <div class="studio-toolbar">
             <button class="btn-outline" type="button" onclick="toggleAllSlides(true)">Select all</button>
             <button class="btn-outline" type="button" onclick="toggleAllSlides(false)">Deselect all</button>
-            <button class="btn-primary" id="rebuild-btn" type="button" onclick="rebuildSlides()">
-              <span id="rebuild-text">Compile slides PDF</span>
+            <button class="btn-primary" id="dl-slides-btn" type="button" onclick="downloadSlides()" style="display:inline-flex;align-items:center;gap:8px;background-color:#FF0000;color:#FFFFFF;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              <span id="dl-slides-text">Download Slides PDF</span>
             </button>
-            <button class="btn-primary" id="dl-slides-btn" type="button" onclick="downloadSlides()" style="display:none;background-color:#000000;">
-              <span>Download Slides PDF</span>
+            <button class="btn-outline" id="rebuild-btn" type="button" onclick="rebuildSlides()" style="display:inline-flex;">
+              <span id="rebuild-text">Update PDF with selection</span>
             </button>
           </div>
         </div>
@@ -2575,8 +2580,27 @@
     } catch(err) { console.warn("Poll error:", err); }
   }
 
-  function downloadSlides() { if (jobId) window.location.href = getDownloadUrl(`/api/download/${jobId}`); }
-  function downloadGuide()  { if (jobId) window.location.href = getDownloadUrl(`/api/download/${jobId}/guide`); }
+  function downloadSlides() {
+    if (!jobId) return;
+    const url = getDownloadUrl(`/api/download/${jobId}`);
+    const a = document.createElement("a");
+    a.href = url;
+    a.setAttribute("download", `slides_${jobId}.pdf`);
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => a.remove(), 200);
+  }
+
+  function downloadGuide() {
+    if (!jobId) return;
+    const url = getDownloadUrl(`/api/download/${jobId}/guide`);
+    const a = document.createElement("a");
+    a.href = url;
+    a.setAttribute("download", `study_guide_${jobId}.pdf`);
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => a.remove(), 200);
+  }
 
   function showProgress() {
     document.getElementById("progress-section").style.display = "block";
@@ -2621,12 +2645,25 @@
     document.getElementById("curation-selected-count").textContent = selected;
     const rebuildBtn = document.getElementById("rebuild-btn");
     const rebuildText = document.getElementById("rebuild-text");
+    const dlSlidesBtn = document.getElementById("dl-slides-btn");
+    const dlSlidesText = document.getElementById("dl-slides-text");
+    const bannerDlText = document.getElementById("banner-dl-text");
+
+    if (bannerDlText) {
+      bannerDlText.textContent = `Download Slides PDF (${selected})`;
+    }
+    if (dlSlidesText) {
+      dlSlidesText.textContent = `Download Slides PDF (${selected})`;
+    }
+
     if (selected === 0) {
-      rebuildBtn.disabled = true;
-      rebuildText.textContent = "Select at least 1 slide";
+      if (rebuildBtn) rebuildBtn.disabled = true;
+      if (dlSlidesBtn) dlSlidesBtn.disabled = true;
+      if (rebuildText) rebuildText.textContent = "Select at least 1 slide";
     } else {
-      rebuildBtn.disabled = false;
-      rebuildText.textContent = `Compile slides PDF (${selected})`;
+      if (rebuildBtn) rebuildBtn.disabled = false;
+      if (dlSlidesBtn) dlSlidesBtn.disabled = false;
+      if (rebuildText) rebuildText.textContent = `Update PDF (${selected} slides)`;
     }
   }
 
@@ -2738,6 +2775,9 @@
       dlBtn.style.display = "inline-flex";
       dlBtn.innerHTML = `<span>Download Slides PDF (${data.slide_count})</span>`;
 
+      // Auto-trigger download for user convenience
+      downloadSlides();
+
       setTimeout(() => {
         msg.style.display = "none";
       }, 6000);
@@ -2823,15 +2863,26 @@
     document.getElementById("progress-section").style.display = "none";
     document.getElementById("error-section").style.display = "none";
 
+    const dlBtn = document.getElementById("dl-slides-btn");
+    if (dlBtn) dlBtn.style.display = "inline-flex";
+    const bannerDlBtn = document.getElementById("banner-dl-slides-btn");
+    if (bannerDlBtn) bannerDlBtn.style.display = "inline-flex";
+
     const guideBtn = document.getElementById("dl-guide-btn");
+    const guideDesc = document.getElementById("guide-desc-text");
     if (outputs && outputs.study_guide_pdf) {
       guideBtn.disabled = false;
       guideBtn.style.opacity = "1";
       guideBtn.style.cursor = "pointer";
     } else {
       guideBtn.disabled = true;
-      guideBtn.style.opacity = "0.35";
+      guideBtn.style.opacity = "0.45";
       guideBtn.style.cursor = "not-allowed";
+      if (guideDesc) {
+        guideDesc.innerHTML = `<span style="color:var(--text-muted);">No spoken transcript was found on this video to generate written textbook notes. Your full <strong>Presentation Slides PDF</strong> is ready for download below!</span>`;
+      }
+      const subLabel = guideBtn.querySelector(".sub-label");
+      if (subLabel) subLabel.textContent = "Not Available (No Transcript)";
     }
 
     loadSlidePreview(jobId);
