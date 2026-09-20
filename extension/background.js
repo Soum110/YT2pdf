@@ -5,7 +5,11 @@
 
 const BACKEND_URLS = [
   "https://yt2pdf-214301889618.europe-west1.run.app",
-  "https://yt2pdfs.com"
+  "https://yt2pdfs.com",
+  "http://localhost:8080",
+  "http://localhost:8000",
+  "http://127.0.0.1:8080",
+  "http://127.0.0.1:8000"
 ];
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -26,7 +30,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
           if (res.ok) {
             const data = await res.json();
-            console.log(`[YT2PDF Background] Upload successful! Job ID:`, data.job_id);
+            console.log(`[YT2PDF Background] Upload successful to ${base}! Job ID:`, data.job_id);
+            data.backend_base = base;
             sendResponse({ success: true, data: data });
             return;
           } else {
@@ -36,7 +41,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
         } catch (err) {
           console.warn(`[YT2PDF Background] Network error on ${base}:`, err.message);
-          lastError = err.message;
+          if (!lastError) lastError = err.message;
         }
       }
 

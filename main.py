@@ -1,6 +1,7 @@
 """
 main.py — FastAPI web server for YT2PDFS
 """
+from __future__ import annotations
 
 # Ensure our project directory is first on sys.path to avoid
 # conflicts with installed packages (e.g. yt-dlp extractor plugins)
@@ -17,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import aiofiles
+from typing import Any, Dict, List, Optional
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -580,7 +582,7 @@ async def health():
 
     return {
         "status": "ok",
-        "commit": "pot-deno-v2",
+        "commit": "companion-v1",
         "api_key_set": bool(GEMINI_API_KEY),
         "cookies_set": bool(cookies_val) or cookie_file.exists(),
         "cookies_source": cookies_source,

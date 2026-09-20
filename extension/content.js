@@ -230,48 +230,27 @@
               payload: payload
             }, (res) => {
               if (chrome.runtime.lastError) {
-                reject(new Error(chrome.runtime.lastError.message));
+                reject(new Error(chrome.runtime.lastError.message + ". Please reload extension in chrome://extensions"));
               } else if (res && res.success) {
                 resolve(res.data);
               } else {
-                reject(new Error(res?.error || "Upload rejected"));
+                reject(new Error(res?.error || "Server upload failed"));
               }
             });
           } else {
-            reject(new Error("Extension messaging not available"));
+            reject(new Error("Extension messaging unavailable. Please reload extension."));
           }
         });
       } catch (bgErr) {
-        console.warn("[YT2PDF Companion] Background worker failed, using direct fetch fallback:", bgErr);
-        // Direct fetch fallback
-        const backends = [
-          "https://yt2pdf-214301889618.europe-west1.run.app",
-          "https://yt2pdfs.com"
-        ];
-        for (const base of backends) {
-          try {
-            const resp = await fetch(`${base}/api/companion/upload-frames`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(payload)
-            });
-            if (resp.ok) {
-              uploadResult = await resp.json();
-              break;
-            } else {
-              uploadError = `HTTP ${resp.status}`;
-            }
-          } catch (e) {
-            uploadError = e.message;
-          }
-        }
-        if (!uploadResult) {
-          throw new Error(uploadError || bgErr.message);
-        }
+        console.error("[YT2PDF Companion] Background worker error:", bgErr);
+        throw bgErr;
       }
 
       const jobId = uploadResult.job_id;
-      const destinationUrl = `https://yt2pdfs.com/?job_id=${jobId}`;
+      let destinationUrl = `https://yt2pdfs.com/?job_id=${jobId}`;
+      if (uploadResult.backend_base && (uploadResult.backend_base.includes("localhost") || uploadResult.backend_base.includes("127.0.0.1"))) {
+        destinationUrl = `${uploadResult.backend_base}/?job_id=${jobId}`;
+      }
 
       buttonEl.innerHTML = `
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2BA640" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>

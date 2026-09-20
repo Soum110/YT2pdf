@@ -17,4 +17,4 @@ binding = "ASSETS"
 not_found_handling = "404-page"
 
 [vars]
-BACKEND_URL = "https://yt2pdf-sc1p.onrender.com"
+BACKEND_URL = "https://yt2pdf-214301889618.europe-west1.run.app"
