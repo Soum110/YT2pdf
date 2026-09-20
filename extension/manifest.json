@@ -30,7 +30,8 @@
     "*://*.youtube.com/*",
     "https://yt2pdfs.com/*",
     "https://*.run.app/*",
-    "http://localhost:*"
+    "http://localhost/*",
+    "http://127.0.0.1/*"
   ],
   "content_scripts": [
     {
@@ -41,6 +42,18 @@
         "content.js"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://yt2pdfs.com/*",
+        "https://*.run.app/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
+      "js": [
+        "web_bridge.js"
+      ],
+      "run_at": "document_start"
     }
   ]
 }

@@ -81,7 +81,158 @@
   }
 
   // ─────────────────────────────────────────────
-  // Background Slide Extraction
+  // Silent Background Tab Mode (Website Automation)
+  // ─────────────────────────────────────────────
+  const isHeadless = new URLSearchParams(window.location.search).get("yt2pdf_headless") === "1";
+
+  async function runHeadlessExtraction() {
+    console.log("[YT2PDF Companion] Initializing silent background extraction...");
+    let video = null;
+    const waitStart = Date.now();
+
+    // Poll for active video element with valid duration
+    while (Date.now() - waitStart < 15000) {
+      video = document.querySelector("video.html5-main-video");
+      if (video && video.duration && !isNaN(video.duration) && video.duration > 0) {
+        break;
+      }
+      await new Promise(r => setTimeout(r, 350));
+    }
+
+    if (!video || !video.duration || isNaN(video.duration)) {
+      console.warn("[YT2PDF Companion] Video element not ready after 15s.");
+      chrome.runtime.sendMessage({
+        action: "headless_extraction_failed",
+        error: "Unable to load YouTube video stream in silent background tab."
+      });
+      return;
+    }
+
+    // Silence audio and pause video immediately
+    video.muted = true;
+    try {
+      await video.play().catch(() => {});
+      video.pause();
+    } catch (e) {}
+
+    // Auto-skip ad if present
+    const skipBtn = document.querySelector(".ytp-skip-ad-button, .ytp-ad-skip-button, .ytp-ad-skip-button-modern");
+    if (skipBtn) {
+      try { skipBtn.click(); } catch (e) {}
+    }
+
+    try {
+      const duration = Math.floor(video.duration);
+      const titleEl = document.querySelector("h1.ytd-watch-metadata yt-formatted-string") ||
+                      document.querySelector("h1.title yt-formatted-string") ||
+                      document.querySelector("h1.title");
+      const videoTitle = titleEl ? titleEl.innerText.trim() : document.title.replace(" - YouTube", "").trim();
+      const cleanUrl = window.location.href.replace(/([&?])yt2pdf_headless=1&?/, "$1").replace(/[?&]$/, "");
+
+      let step = 10;
+      if (duration > 3600) step = 45;
+      else if (duration > 1800) step = 30;
+      else if (duration > 600) step = 15;
+      else step = 8;
+
+      const samplePoints = [];
+      for (let t = 2; t < duration - 2; t += step) {
+        samplePoints.push(t);
+      }
+      const maxFrames = 30;
+      const finalPoints = samplePoints.length > maxFrames
+        ? samplePoints.filter((_, idx) => idx % Math.ceil(samplePoints.length / maxFrames) === 0)
+        : samplePoints;
+
+      const captureCanvas = document.createElement("canvas");
+      captureCanvas.width = 1280;
+      captureCanvas.height = 720;
+      const captureCtx = captureCanvas.getContext("2d");
+
+      const thumbCanvasA = document.createElement("canvas");
+      thumbCanvasA.width = 32;
+      thumbCanvasA.height = 18;
+      const thumbCanvasB = document.createElement("canvas");
+      thumbCanvasB.width = 32;
+      thumbCanvasB.height = 18;
+
+      const capturedSlides = [];
+      let hasPreviousThumb = false;
+
+      for (let i = 0; i < finalPoints.length; i++) {
+        const timeTarget = finalPoints[i];
+        await new Promise((resolve) => {
+          const onSeeked = () => {
+            video.removeEventListener("seeked", onSeeked);
+            resolve();
+          };
+          video.addEventListener("seeked", onSeeked, { once: true });
+          video.currentTime = timeTarget;
+          setTimeout(resolve, 350);
+        });
+
+        const activeThumbCanvas = (capturedSlides.length % 2 === 0) ? thumbCanvasA : thumbCanvasB;
+        const prevThumbCanvas = (capturedSlides.length % 2 === 0) ? thumbCanvasB : thumbCanvasA;
+        const activeThumbCtx = activeThumbCanvas.getContext("2d");
+        activeThumbCtx.drawImage(video, 0, 0, 32, 18);
+
+        let isDistinct = true;
+        if (hasPreviousThumb) {
+          const diff = calculateDifference(activeThumbCanvas, prevThumbCanvas);
+          if (diff < 0.07) isDistinct = false;
+        }
+
+        if (isDistinct) {
+          hasPreviousThumb = true;
+          captureCtx.drawImage(video, 0, 0, 1280, 720);
+          capturedSlides.push({
+            timestamp: timeTarget,
+            time_formatted: `${Math.floor(timeTarget / 60)}:${String(timeTarget % 60).padStart(2, "0")}`,
+            data: captureCanvas.toDataURL("image/jpeg", 0.78)
+          });
+        }
+      }
+
+      if (capturedSlides.length === 0) {
+        captureCtx.drawImage(video, 0, 0, 1280, 720);
+        capturedSlides.push({
+          timestamp: 0,
+          time_formatted: "0:00",
+          data: captureCanvas.toDataURL("image/jpeg", 0.78)
+        });
+      }
+
+      console.log(`[YT2PDF Companion] Silent extraction complete (${capturedSlides.length} slides). Transmitting...`);
+
+      const payload = {
+        video_url: cleanUrl,
+        title: videoTitle,
+        duration: duration,
+        frames: capturedSlides
+      };
+
+      chrome.runtime.sendMessage({
+        action: "upload_frames",
+        payload: payload,
+        headless: true
+      });
+
+    } catch (err) {
+      console.error("[YT2PDF Companion] Headless extraction error:", err);
+      chrome.runtime.sendMessage({
+        action: "headless_extraction_failed",
+        error: err.message
+      });
+    }
+  }
+
+  if (isHeadless) {
+    runHeadlessExtraction();
+    return; // Do not inject watch-page buttons or register watch-page listeners
+  }
+
+  // ─────────────────────────────────────────────
+  // Watch Page Slide Extraction (Manual Trigger)
   // ─────────────────────────────────────────────
   async function startSlideExtraction(buttonEl) {
     if (isExtracting) return;

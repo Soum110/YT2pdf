@@ -580,7 +580,7 @@
 
     .input-meta-bar {
       display: flex;
-      justify-content: flex-end;
+      justify-content: space-between;
       align-items: center;
       margin-top: 10px;
       font-size: 12px;
@@ -1118,6 +1118,28 @@
       background: rgba(255, 0, 0, 0.15);
       border-color: rgba(255, 0, 0, 0.35);
       transform: translateY(-1px);
+    }
+    .btn-companion-nav.active-connected {
+      background: rgba(16, 185, 129, 0.1);
+      border-color: rgba(16, 185, 129, 0.35);
+      color: var(--ink);
+    }
+    .btn-companion-nav.active-connected:hover {
+      background: rgba(16, 185, 129, 0.18);
+      border-color: rgba(16, 185, 129, 0.5);
+    }
+    .companion-status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #10b981;
+      box-shadow: 0 0 6px #10b981;
+      display: inline-block;
+      animation: companionPulse 2s infinite ease-in-out;
+    }
+    @keyframes companionPulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.55; transform: scale(0.85); }
     }
 
     .companion-promo-banner {
@@ -2014,7 +2036,11 @@
       </div>
 
       <div class="input-meta-bar">
-        <div class="enter-hint">Press Enter ↵ to convert</div>
+        <div id="companion-active-badge" style="display:none;align-items:center;gap:6px;font-size:12px;color:#10b981;font-weight:600;">
+          <span class="companion-status-dot"></span>
+          <span>Companion Active (Silent Background Mode)</span>
+        </div>
+        <div class="enter-hint" style="margin-left:auto;">Press Enter ↵ to convert</div>
       </div>
 
       <!-- Companion Extension Promo Banner -->
@@ -2524,17 +2550,157 @@
     return (activeBackendPrefix || "") + path;
   }
 
+  function initCompanionDetection() {
+    function markActive() {
+      document.body.classList.add("companion-active");
+      const badge = document.getElementById("companion-active-badge");
+      if (badge) badge.style.display = "inline-flex";
+
+      const navBtn = document.querySelector(".btn-companion-nav");
+      if (navBtn) {
+        navBtn.classList.add("active-connected");
+        navBtn.innerHTML = `
+          <span class="companion-status-dot"></span>
+          <span>Companion Active</span>
+        `;
+        navBtn.title = "Chrome Companion is connected (Silent background extraction enabled)";
+      }
+
+      const bannerText = document.querySelector(".companion-promo-text");
+      const pillBadge = document.querySelector(".companion-pill-badge");
+      const promoLink = document.querySelector(".companion-promo-link");
+      if (pillBadge) {
+        pillBadge.textContent = "⚡ Extension Active";
+        pillBadge.style.background = "#10b981";
+        pillBadge.style.color = "#FFFFFF";
+      }
+      if (bannerText) {
+        bannerText.innerHTML = "<strong>Silent extraction active!</strong> Paste any YouTube link above and presentation slides will be extracted automatically without leaving this page.";
+      }
+      if (promoLink) {
+        promoLink.textContent = "How it works ✓";
+        promoLink.style.color = "#10b981";
+      }
+    }
+
+    if (document.documentElement.dataset.yt2pdfCompanion === "active" ||
+        document.documentElement.getAttribute("data-yt2pdf-companion") === "active" ||
+        window.__YT2PDF_COMPANION_ACTIVE__ === true) {
+      markActive();
+    }
+
+    window.addEventListener("YT2PDF_COMPANION_READY", markActive);
+    window.addEventListener("YT2PDF_PONG", markActive);
+
+    let checks = 0;
+    const interval = setInterval(() => {
+      if (document.documentElement.dataset.yt2pdfCompanion === "active" ||
+          document.documentElement.getAttribute("data-yt2pdf-companion") === "active" ||
+          window.__YT2PDF_COMPANION_ACTIVE__ === true) {
+        markActive();
+        clearInterval(interval);
+      } else {
+        window.dispatchEvent(new CustomEvent("YT2PDF_PING"));
+      }
+      checks++;
+      if (checks > 10) clearInterval(interval);
+    }, 400);
+  }
+
   async function startJob() {
-    const url = document.getElementById("url-input").value.trim();
-    if (!url) {
+    const rawUrl = document.getElementById("url-input").value.trim();
+    if (!rawUrl) {
       document.getElementById("url-input").style.boxShadow = "0 0 0 2px var(--danger)";
       setTimeout(() => document.getElementById("url-input").style.boxShadow = "", 1500);
       return;
     }
+
+    // Normalize YouTube URL so shorts / youtu.be / watch URLs all work cleanly
+    let url = rawUrl;
+    try {
+      const u = new URL(rawUrl);
+      let vid = "";
+      if (u.hostname.includes("youtu.be")) {
+        vid = u.pathname.replace(/^\//, "").split("?")[0];
+      } else if (u.pathname.includes("/shorts/")) {
+        vid = u.pathname.split("/shorts/")[1]?.split("/")[0];
+      } else if (u.searchParams.has("v")) {
+        vid = u.searchParams.get("v");
+      }
+      if (vid) {
+        url = `https://www.youtube.com/watch?v=${vid}`;
+      }
+    } catch (e) {}
+
     document.getElementById("submit-btn").disabled = true;
     document.getElementById("url-input").disabled = true;
-    document.getElementById("btn-text").textContent = "Processing...";
 
+    const isCompanionActive = document.documentElement.dataset.yt2pdfCompanion === "active" ||
+                              document.documentElement.getAttribute("data-yt2pdf-companion") === "active" ||
+                              window.__YT2PDF_COMPANION_ACTIVE__ === true;
+
+    if (isCompanionActive) {
+      document.getElementById("btn-text").textContent = "Extracting...";
+      showProgress();
+      updateProgress({
+        stage: "fetch",
+        progress: 15,
+        message: "⚡ Companion Extension is extracting presentation slides in a silent background tab..."
+      });
+
+      try {
+        const extractionPromise = new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            window.removeEventListener("YT2PDF_EXTRACTION_RESULT", handler);
+            reject(new Error("Companion extraction timed out. Falling back to server conversion."));
+          }, 45000);
+
+          function handler(evt) {
+            window.removeEventListener("YT2PDF_EXTRACTION_RESULT", handler);
+            clearTimeout(timeout);
+            if (evt.detail && evt.detail.success) {
+              resolve(evt.detail);
+            } else {
+              reject(new Error(evt?.detail?.error || "Silent companion extraction failed."));
+            }
+          }
+          window.addEventListener("YT2PDF_EXTRACTION_RESULT", handler);
+
+          window.dispatchEvent(new CustomEvent("YT2PDF_START_EXTRACTION", {
+            detail: { video_url: url }
+          }));
+        });
+
+        const result = await extractionPromise;
+        console.log("[Website] Silent extraction succeeded via Companion:", result);
+        jobId = result.job_id;
+        if (result.backend_base) {
+          activeBackendPrefix = result.backend_base;
+        }
+        localStorage.setItem("yt2pdf_last_job", jobId);
+        const banner = document.getElementById("recent-job-banner");
+        if (banner) banner.style.display = "none";
+
+        updateProgress({
+          stage: "slides",
+          progress: 85,
+          message: `Captured ${result.slide_count || 'presentation'} slides! Finalizing PDF compilation...`
+        });
+
+        pollTimer = setInterval(pollStatus, 1500);
+        return;
+      } catch (companionErr) {
+        console.warn("[Website] Companion extraction fallback triggered:", companionErr.message);
+        updateProgress({
+          stage: "fetch",
+          progress: 20,
+          message: "Switching to cloud server conversion..."
+        });
+      }
+    }
+
+    // Default or Fallback: Standard Server Processing
+    document.getElementById("btn-text").textContent = "Processing...";
     try {
       const res = await apiFetch("/api/process", {
         method: "POST",
@@ -2739,7 +2905,7 @@
           </div>
         </div>
         <div class="slide-thumb" onclick="toggleSlide('${slide.filename}')">
-          <img src="${slide.image_url}" loading="lazy" alt="Slide ${slide.index}" />
+          <img src="${getDownloadUrl(slide.image_url)}" loading="lazy" alt="Slide ${slide.index}" />
         </div>
         <div class="slide-footer-strip" onclick="toggleSlide('${slide.filename}')">
           <span class="slide-status-text">
@@ -2844,7 +3010,7 @@
     if (!slide) return;
     modalCurrentFilename = filename;
     document.getElementById("modal-slide-title").textContent = slide.title;
-    document.getElementById("modal-slide-img").src = slide.image_url;
+    document.getElementById("modal-slide-img").src = getDownloadUrl(slide.image_url);
     document.getElementById("modal-slide-meta").textContent = `Slide ${slide.index} of ${allJobSlides.length} • Timestamp: ${slide.timestamp_str}`;
     updateModalToggleBtn();
     document.getElementById("slide-modal").classList.add("active");
@@ -3023,6 +3189,7 @@
   });
 
   window.addEventListener("DOMContentLoaded", async () => {
+    initCompanionDetection();
     const params = new URLSearchParams(window.location.search);
     const urlJob = params.get("job_id") || params.get("job");
     if (urlJob) {
