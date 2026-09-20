@@ -362,6 +362,13 @@ def _get_video_info(url: str) -> dict:
         log.info("Using instant oEmbed metadata fallback for %s: %s", video_id, oembed_info.get("title"))
         return oembed_info
 
+    is_bot_block = any("bot" in str(e).lower() or "sign in" in str(e).lower() for e in all_errors)
+    if is_bot_block:
+        raise RuntimeError(
+            "YouTube blocked datacenter server access for this video. "
+            "Please use the YT2PDF Slide Companion browser extension to capture slides directly with zero bot blocks."
+        )
+
     raise RuntimeError(f"Could not fetch video info from YouTube: {'; '.join(all_errors)}")
 
 

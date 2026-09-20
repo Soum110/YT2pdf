@@ -84,16 +84,47 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // 2. Headless tab reported failure
   if (message.action === "headless_extraction_failed") {
-    const tabId = sender.tab?.id;
-    if (tabId && activeExtractions.has(tabId)) {
-      const pending = activeExtractions.get(tabId);
+    let tabId = sender.tab?.id;
+    let pending = (tabId && activeExtractions.has(tabId)) ? activeExtractions.get(tabId) : null;
+    if (!pending && activeExtractions.size > 0) {
+      const firstKey = activeExtractions.keys().next().value;
+      pending = activeExtractions.get(firstKey);
+      tabId = firstKey;
+    }
+    if (pending) {
       clearTimeout(pending.timeout);
-      chrome.tabs.remove(tabId).catch(() => {});
+      if (tabId) chrome.tabs.remove(tabId).catch(() => {});
       if (pending.originTabId) {
         chrome.tabs.update(pending.originTabId, { active: true }).catch(() => {});
       }
       activeExtractions.delete(tabId);
       pending.sendResponse({ success: false, error: message.error || "Background extraction failed." });
+    }
+    return false;
+  }
+
+  // 2b. Headless tab reported direct upload success
+  if (message.action === "headless_extraction_direct_success") {
+    let tabId = sender.tab?.id;
+    let pending = (tabId && activeExtractions.has(tabId)) ? activeExtractions.get(tabId) : null;
+    if (!pending && activeExtractions.size > 0) {
+      const firstKey = activeExtractions.keys().next().value;
+      pending = activeExtractions.get(firstKey);
+      tabId = firstKey;
+    }
+    if (pending) {
+      clearTimeout(pending.timeout);
+      if (tabId) chrome.tabs.remove(tabId).catch(() => {});
+      if (pending.originTabId) {
+        chrome.tabs.update(pending.originTabId, { active: true }).catch(() => {});
+      }
+      activeExtractions.delete(tabId);
+      pending.sendResponse({
+        success: true,
+        job_id: message.data?.job_id,
+        backend_base: message.data?.backend_base || "https://yt2pdfs.com",
+        slide_count: message.slide_count || 0
+      });
     }
     return false;
   }
@@ -120,12 +151,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             data.backend_base = base;
 
             // If this upload came from a silent background tab, complete the pending web bridge request and close tab!
-            const tabId = sender.tab?.id;
-            if (tabId && activeExtractions.has(tabId)) {
+            let tabId = sender.tab?.id;
+            let pending = (tabId && activeExtractions.has(tabId)) ? activeExtractions.get(tabId) : null;
+            if (!pending && activeExtractions.size > 0) {
+              const firstKey = activeExtractions.keys().next().value;
+              pending = activeExtractions.get(firstKey);
+              tabId = firstKey;
+            }
+            if (pending) {
               console.log(`[YT2PDF Background] Resolving silent extraction for tab ${tabId} with Job ID ${data.job_id}`);
-              const pending = activeExtractions.get(tabId);
               clearTimeout(pending.timeout);
-              chrome.tabs.remove(tabId).catch(() => {});
+              if (tabId) chrome.tabs.remove(tabId).catch(() => {});
               if (pending.originTabId) {
                 chrome.tabs.update(pending.originTabId, { active: true }).catch(() => {});
               }

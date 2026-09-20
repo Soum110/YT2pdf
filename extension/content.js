@@ -398,25 +398,50 @@
     const waitStart = Date.now();
 
     // 3. Actively wake up YouTube player & resolve duration
-    while (Date.now() - waitStart < 12000) {
-      video = document.querySelector("video.html5-main-video");
+    while (Date.now() - waitStart < 15000) {
+      video = document.querySelector("video.html5-main-video, video");
 
-      // Resolve duration from meta tag if available
+      // 1. og:video:duration (exact integer seconds)
+      if (!resolvedDuration) {
+        const ogDur = document.querySelector('meta[property="og:video:duration"]')?.getAttribute("content");
+        if (ogDur && !isNaN(parseInt(ogDur, 10)) && parseInt(ogDur, 10) > 0) {
+          resolvedDuration = parseInt(ogDur, 10);
+        }
+      }
+
+      // 2. meta itemprop="duration" (ISO 8601 string)
       if (!resolvedDuration) {
         const metaDur = document.querySelector('meta[itemprop="duration"]')?.getAttribute("content");
         if (metaDur) resolvedDuration = parseISO8601(metaDur);
       }
 
-      // Resolve duration from movie_player API
+      // 3. HTML script tags with lengthSeconds
       if (!resolvedDuration) {
-        const mp = document.getElementById("movie_player");
-        if (mp && typeof mp.getDuration === "function") {
-          const d = mp.getDuration();
-          if (d && !isNaN(d) && d > 0) resolvedDuration = Math.floor(d);
+        for (const s of document.querySelectorAll("script")) {
+          if (s.textContent && s.textContent.includes("lengthSeconds")) {
+            const m = s.textContent.match(/["']lengthSeconds["']\s*:\s*["']?(\d+)["']?/);
+            if (m && m[1]) {
+              const sec = parseInt(m[1], 10);
+              if (sec > 0) { resolvedDuration = sec; break; }
+            }
+          }
         }
       }
 
-      // Keep video active & playing muted so decoder never freezes
+      // 4. Player UI time duration (.ytp-time-duration e.g. "12:34")
+      if (!resolvedDuration) {
+        const timeDur = document.querySelector(".ytp-time-duration")?.textContent?.trim();
+        if (timeDur && timeDur.includes(":")) {
+          const parts = timeDur.split(":").map(Number);
+          if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+            resolvedDuration = parts[0] * 60 + parts[1];
+          } else if (parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
+            resolvedDuration = parts[0] * 3600 + parts[1] * 60 + parts[2];
+          }
+        }
+      }
+
+      // 5. Video element duration & kickstart muted playback
       if (video) {
         video.muted = true;
         video.play().catch(() => {});
@@ -450,7 +475,7 @@
     }
 
     if (!video || !resolvedDuration) {
-      console.warn("[YT2PDF Companion] Video element or duration not ready after 12s.");
+      console.warn("[YT2PDF Companion] Video element or duration not ready after 15s.");
       safeSendRuntimeMessage({
         action: "headless_extraction_failed",
         error: "Unable to load YouTube video stream in silent background tab."
@@ -463,6 +488,15 @@
     try {
       await video.play().catch(() => {});
     } catch (e) {}
+
+    // Wait briefly for video stream to be ready for frame extraction
+    const readyStart = Date.now();
+    while (Date.now() - readyStart < 4000) {
+      if (video && (video.readyState >= 2 || video.videoWidth > 0)) {
+        break;
+      }
+      await unthrottledSleep(150);
+    }
 
     try {
       const duration = resolvedDuration;
@@ -516,8 +550,9 @@
             video.addEventListener("seeked", onSeeked, { once: true });
             video.currentTime = timeTarget;
           }),
-          unthrottledSleep(240)
+          unthrottledSleep(280)
         ]);
+        await unthrottledSleep(50);
 
         const activeThumbCanvas = (capturedSlides.length % 2 === 0) ? thumbCanvasA : thumbCanvasB;
         const prevThumbCanvas = (capturedSlides.length % 2 === 0) ? thumbCanvasB : thumbCanvasA;
@@ -571,6 +606,22 @@
         action: "upload_frames",
         payload: payload,
         headless: true
+      }, (res) => {
+        if (!res || !res.success) {
+          console.warn("[YT2PDF Companion] safeSendRuntimeMessage upload failed or timed out, trying direct upload fallback...");
+          directUploadFrames(payload).then((directRes) => {
+            safeSendRuntimeMessage({
+              action: "headless_extraction_direct_success",
+              data: directRes,
+              slide_count: capturedSlides.length
+            });
+          }).catch((dErr) => {
+            safeSendRuntimeMessage({
+              action: "headless_extraction_failed",
+              error: dErr.message
+            });
+          });
+        }
       });
 
     } catch (err) {

@@ -1173,14 +1173,74 @@
       }
     }
 
+    /* ── Companion Beeping Dot Indicator (Under Input) ── */
+    .companion-indicator-wrap {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      cursor: pointer;
+      padding: 3px 0;
+      user-select: none;
+      transition: opacity var(--tr);
+    }
+    .companion-indicator-wrap:hover {
+      opacity: 0.82;
+    }
+    .beeping-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      display: inline-block;
+      position: relative;
+      flex-shrink: 0;
+    }
+    .beeping-dot.status-uninstalled {
+      background-color: #ef4444;
+      box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+      animation: beepingPulseRed 1.8s infinite cubic-bezier(0.2, 0.8, 0.4, 1);
+    }
+    @keyframes beepingPulseRed {
+      0% {
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.75);
+      }
+      70% {
+        box-shadow: 0 0 0 6px rgba(239, 68, 68, 0);
+      }
+      100% {
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+      }
+    }
+    .beeping-dot.status-installed {
+      background-color: #10b981;
+      box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+      animation: beepingPulseGreen 1.8s infinite cubic-bezier(0.2, 0.8, 0.4, 1);
+    }
+    @keyframes beepingPulseGreen {
+      0% {
+        box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.75);
+      }
+      70% {
+        box-shadow: 0 0 0 6px rgba(16, 185, 129, 0);
+      }
+      100% {
+        box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+      }
+    }
+    .beeping-status-text {
+      font-size: 11.5px;
+      font-weight: 500;
+      color: var(--text-muted);
+      letter-spacing: 0.1px;
+    }
+
     /* ── Sleek Companion Panel & Integrated FAQs ── */
     .companion-panel {
       margin-top: 18px;
       padding: 16px 18px;
       background: var(--canvas-soft);
       border: 1px solid var(--hairline-soft);
-      border-radius: var(--rounded-sm);
-      transition: border-color var(--tr);
+      border-radius: var(--rounded-md);
+      transition: border-color var(--tr), background-color var(--tr);
     }
     .companion-panel:hover {
       border-color: var(--hairline);
@@ -1190,31 +1250,29 @@
       align-items: center;
       justify-content: space-between;
       gap: 16px;
-      padding-bottom: 14px;
+      padding-bottom: 12px;
       border-bottom: 1px solid var(--hairline-soft);
     }
     .companion-panel-lead {
       display: flex;
       align-items: center;
       gap: 12px;
-      flex: 1;
+      min-width: 0;
     }
     .companion-icon-wrap {
-      width: 38px;
-      height: 38px;
-      border-radius: 10px;
-      background: var(--canvas);
+      width: 36px;
+      height: 36px;
+      border-radius: var(--rounded-sm);
+      background: var(--card-bg);
       border: 1px solid var(--hairline-soft);
-      color: var(--ink);
       display: flex;
       align-items: center;
       justify-content: center;
+      color: var(--ink);
       flex-shrink: 0;
     }
     .companion-lead-copy {
-      display: flex;
-      flex-direction: column;
-      gap: 3px;
+      min-width: 0;
     }
     .companion-lead-title {
       font-size: 13.5px;
@@ -1230,9 +1288,9 @@
       font-weight: 600;
       padding: 2.5px 8px;
       border-radius: 999px;
-      background: rgba(0, 102, 255, 0.08);
-      color: var(--accent);
-      border: 1px solid rgba(0, 102, 255, 0.2);
+      background: var(--canvas);
+      color: var(--text-muted);
+      border: 1px solid var(--hairline);
       letter-spacing: 0.2px;
       display: inline-flex;
       align-items: center;
@@ -1242,30 +1300,14 @@
     .companion-badge-pill.is-active {
       background: rgba(16, 185, 129, 0.08);
       color: #10b981;
-      border-color: rgba(16, 185, 129, 0.28);
+      border-color: rgba(16, 185, 129, 0.24);
     }
     .companion-pulse-dot {
-      width: 6px;
-      height: 6px;
+      width: 5px;
+      height: 5px;
       border-radius: 50%;
       background: #10b981;
       display: inline-block;
-      box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.6);
-      animation: companionPulseGlow 2s infinite ease-in-out;
-    }
-    @keyframes companionPulseGlow {
-      0% {
-        transform: scale(0.95);
-        box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
-      }
-      70% {
-        transform: scale(1.05);
-        box-shadow: 0 0 0 5px rgba(16, 185, 129, 0);
-      }
-      100% {
-        transform: scale(0.95);
-        box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
-      }
     }
     .companion-lead-subtitle {
       font-size: 12.5px;
@@ -1274,9 +1316,9 @@
       margin: 0;
     }
     .btn-companion-action {
-      font-size: 12.5px;
+      font-size: 12px;
       font-weight: 550;
-      padding: 7px 15px;
+      padding: 6px 14px;
       border-radius: var(--rounded-full);
       background: var(--card-bg);
       color: var(--ink);
@@ -1284,7 +1326,7 @@
       cursor: pointer;
       display: inline-flex;
       align-items: center;
-      gap: 7px;
+      gap: 6px;
       flex-shrink: 0;
       white-space: nowrap;
       transition: all var(--tr);
@@ -1297,12 +1339,9 @@
     .btn-companion-action.is-active {
       background: rgba(16, 185, 129, 0.08);
       color: #10b981;
-      border-color: rgba(16, 185, 129, 0.32);
-      box-shadow: 0 1px 3px rgba(16, 185, 129, 0.08);
-    }
-    .btn-companion-action.is-active:hover {
-      background: rgba(16, 185, 129, 0.14);
-      border-color: rgba(16, 185, 129, 0.45);
+      border-color: rgba(16, 185, 129, 0.25);
+      cursor: default;
+      transform: none;
     }
     .companion-qa-group {
       display: flex;
@@ -2304,11 +2343,11 @@
       </div>
 
       <div class="input-meta-bar">
-        <div id="companion-active-badge" style="display:none;align-items:center;gap:6px;font-size:12px;color:#10b981;font-weight:600;">
-          <span class="companion-status-dot"></span>
-          <span>Companion Active (Silent Background Mode)</span>
+        <div class="companion-indicator-wrap" id="companion-indicator-wrap" onclick="handleCompanionIndicatorClick()" role="button" tabindex="0" title="Companion Extension Status">
+          <span class="beeping-dot status-uninstalled" id="companion-beeping-dot"></span>
+          <span class="beeping-status-text" id="companion-status-text">Companion Not Installed</span>
         </div>
-        <div class="enter-hint" style="margin-left:auto;">Press Enter ↵ to convert</div>
+        <div class="enter-hint">Press Enter ↵ to convert</div>
       </div>
 
       <!-- Companion Extension Section (Replaces Red Banner) -->
@@ -2326,20 +2365,15 @@
             <div class="companion-lead-copy">
               <div class="companion-lead-title">
                 <span>Companion Extension</span>
-                <span class="companion-badge-pill" id="companion-badge-pill">Bypasses Bot Blocks</span>
+                <span class="companion-badge-pill" id="companion-badge-pill">Recommended</span>
               </div>
               <p class="companion-lead-subtitle">
-                Firstly, install this extension in your browser to bypass server download bot inspection.
+                Captures high-resolution presentation slides directly in your browser with zero datacenter bot blocks.
               </p>
             </div>
           </div>
-          <button type="button" class="btn-companion-action" onclick="openCompanionModal()" aria-label="Install Chrome Companion Extension">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-              <polyline points="7 10 12 15 17 10"></polyline>
-              <line x1="12" y1="15" x2="12" y2="3"></line>
-            </svg>
-            <span>Chrome Extension ↗</span>
+          <button type="button" class="btn-companion-action" id="companion-action-btn" onclick="openCompanionModal()" aria-label="Install Chrome Companion Extension">
+            <span>Get Extension ↗</span>
           </button>
         </div>
 
@@ -2852,47 +2886,100 @@
     return (activeBackendPrefix || "") + path;
   }
 
+  function handleCompanionIndicatorClick() {
+    const isCompanionActive = document.documentElement.dataset.yt2pdfCompanion === "active" ||
+                              document.documentElement.getAttribute("data-yt2pdf-companion") === "active" ||
+                              window.__YT2PDF_COMPANION_ACTIVE__ === true;
+    if (!isCompanionActive) {
+      openCompanionModal();
+    }
+  }
+
   function initCompanionDetection() {
-    function markActive() {
-      document.body.classList.add("companion-active");
-      const badge = document.getElementById("companion-active-badge");
-      if (badge) badge.style.display = "inline-flex";
-
+    function setCompanionState(isInstalled) {
+      const dot = document.getElementById("companion-beeping-dot");
+      const label = document.getElementById("companion-status-text");
       const navIndicator = document.getElementById("companion-nav-indicator");
-      if (navIndicator) {
-        navIndicator.classList.remove("status-uninstalled");
-        navIndicator.classList.add("status-installed");
-        navIndicator.title = "Companion Extension Active & Connected (Silent background extraction ready)";
-        navIndicator.setAttribute("aria-label", "Companion extension status: Active and connected");
-      }
-
+      const widget = document.getElementById("companion-indicator-wrap");
       const stepBadge = document.querySelector(".companion-step-badge, .companion-badge-pill");
+      const installBtn = document.getElementById("companion-action-btn");
       const installText = document.querySelector(".companion-install-text, .companion-lead-subtitle");
-      const installBtn = document.querySelector(".companion-install-btn, .btn-companion-action");
-      if (stepBadge) {
-        stepBadge.innerHTML = `<span class="companion-pulse-dot"></span><span>Active</span>`;
-        stepBadge.classList.add("is-active");
+
+      if (isInstalled) {
+        document.body.classList.add("companion-active");
+        if (dot) {
+          dot.classList.remove("status-uninstalled");
+          dot.classList.add("status-installed");
+        }
+        if (label) {
+          label.textContent = "Extension Connected";
+        }
+        if (widget) {
+          widget.title = "YT2PDF Slide Companion Active — Silent background slide extraction ready";
+        }
+        if (navIndicator) {
+          navIndicator.classList.remove("status-uninstalled");
+          navIndicator.classList.add("status-installed");
+          navIndicator.title = "Extension Connected (Silent background extraction active)";
+        }
+        if (stepBadge) {
+          stepBadge.innerHTML = `<span class="companion-pulse-dot"></span><span>Active</span>`;
+          stepBadge.classList.add("is-active");
+        }
+        if (installBtn) {
+          installBtn.classList.add("is-active");
+          installBtn.innerHTML = `<span>Connected</span>`;
+        }
+        if (installText) {
+          installText.innerHTML = "<strong>Companion active!</strong> Instant silent background slide extraction is ready.";
+        }
+      } else {
+        document.body.classList.remove("companion-active");
+        if (dot) {
+          dot.classList.remove("status-installed");
+          dot.classList.add("status-uninstalled");
+        }
+        if (label) {
+          label.textContent = "Companion Not Installed";
+        }
+        if (widget) {
+          widget.title = "Companion Extension Not Detected — Click to Install";
+        }
+        if (navIndicator) {
+          navIndicator.classList.remove("status-installed");
+          navIndicator.classList.add("status-uninstalled");
+          navIndicator.title = "Companion Extension Not Detected — Click to Install";
+        }
+        if (stepBadge) {
+          stepBadge.innerHTML = `Recommended`;
+          stepBadge.classList.remove("is-active");
+        }
+        if (installBtn) {
+          installBtn.classList.remove("is-active");
+          installBtn.innerHTML = `<span>Get Extension ↗</span>`;
+        }
       }
-      if (installText) {
-        installText.innerHTML = "<strong>Companion active!</strong> Instant silent background slide extraction is ready.";
-      }
-      if (installBtn) {
-        installBtn.classList.add("is-active");
-        installBtn.innerHTML = `
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-          <span>Connected</span>
-        `;
-      }
+    }
+
+    function markActive() {
+      setCompanionState(true);
     }
 
     if (document.documentElement.dataset.yt2pdfCompanion === "active" ||
         document.documentElement.getAttribute("data-yt2pdf-companion") === "active" ||
         window.__YT2PDF_COMPANION_ACTIVE__ === true) {
       markActive();
+    } else {
+      setCompanionState(false);
     }
 
     window.addEventListener("YT2PDF_COMPANION_READY", markActive);
     window.addEventListener("YT2PDF_PONG", markActive);
+    window.addEventListener("message", (e) => {
+      if (e.data?.type === "YT2PDF_COMPANION_READY" || e.data?.type === "YT2PDF_PONG" || e.data?.type === "YT2PDF_COMPANION_ANNOUNCE") {
+        markActive();
+      }
+    });
 
     let checks = 0;
     const interval = setInterval(() => {
@@ -2903,10 +2990,11 @@
         clearInterval(interval);
       } else {
         window.dispatchEvent(new CustomEvent("YT2PDF_PING"));
+        window.postMessage({ type: "YT2PDF_PING" }, "*");
       }
       checks++;
-      if (checks > 10) clearInterval(interval);
-    }, 400);
+      if (checks > 12) clearInterval(interval);
+    }, 350);
   }
 
   async function startJob() {
@@ -2916,6 +3004,12 @@
       setTimeout(() => document.getElementById("url-input").style.boxShadow = "", 1500);
       return;
     }
+
+    // Clean address bar query params immediately on submission
+    try {
+      const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
+      window.history.replaceState({ path: cleanUrl }, "", cleanUrl);
+    } catch (e) {}
 
     // Normalize YouTube URL so shorts / youtu.be / watch URLs all work cleanly
     let url = rawUrl;
@@ -2950,7 +3044,8 @@
         };
         window.addEventListener("YT2PDF_PONG", onPong);
         window.dispatchEvent(new CustomEvent("YT2PDF_PING"));
-        setTimeout(resolve, 350);
+        window.postMessage({ type: "YT2PDF_PING" }, "*");
+        setTimeout(resolve, 400);
       });
     }
 
@@ -2960,18 +3055,25 @@
       updateProgress({
         stage: "fetch",
         progress: 15,
-        message: "⚡ Companion Extension is capturing presentation slides in a silent background tab..."
+        message: "⚡ Capturing presentation slides in background tab..."
       });
 
       try {
         const extractionPromise = new Promise((resolve, reject) => {
+          let hasSettled = false;
           const timeout = setTimeout(() => {
+            if (hasSettled) return;
+            hasSettled = true;
             window.removeEventListener("YT2PDF_EXTRACTION_RESULT", handler);
-            reject(new Error("Companion extraction timed out. Please check if the video is available and try again."));
-          }, 35000);
+            window.removeEventListener("message", msgHandler);
+            reject(new Error("Slide capture in background tab timed out. Please check that the YouTube video is publicly accessible and try again."));
+          }, 45000);
 
           function handler(evt) {
+            if (hasSettled) return;
+            hasSettled = true;
             window.removeEventListener("YT2PDF_EXTRACTION_RESULT", handler);
+            window.removeEventListener("message", msgHandler);
             clearTimeout(timeout);
             if (evt.detail && evt.detail.success) {
               resolve(evt.detail);
@@ -2979,15 +3081,24 @@
               reject(new Error(evt?.detail?.error || "Companion slide extraction failed."));
             }
           }
+
+          function msgHandler(e) {
+            if (e.data?.type === "YT2PDF_EXTRACTION_RESULT") {
+              handler({ detail: e.data.detail });
+            }
+          }
+
           window.addEventListener("YT2PDF_EXTRACTION_RESULT", handler);
+          window.addEventListener("message", msgHandler);
 
           window.dispatchEvent(new CustomEvent("YT2PDF_START_EXTRACTION", {
             detail: { video_url: url }
           }));
+          window.postMessage({ type: "YT2PDF_START_EXTRACTION", video_url: url }, "*");
         });
 
         const result = await extractionPromise;
-        console.log("[Website] Extraction succeeded via Companion:", result);
+        console.log("[Website] Silent extraction succeeded via Companion:", result);
         jobId = result.job_id;
         if (result.backend_base) {
           activeBackendPrefix = result.backend_base;
@@ -3007,7 +3118,7 @@
         return;
       } catch (companionErr) {
         console.warn("[Website] Companion extraction error:", companionErr.message);
-        showError(`Companion Extension Error: ${companionErr.message}`);
+        showError(companionErr.message);
         return;
       }
     }
@@ -3453,7 +3564,13 @@
     document.getElementById("error-section").style.display = "block";
     document.getElementById("progress-section").style.display = "none";
     document.getElementById("result-section").style.display = "none";
-    document.getElementById("error-msg").textContent = msg;
+
+    let cleanMsg = msg;
+    if (typeof cleanMsg === "string" && (cleanMsg.includes("Sign in to confirm you're not a bot") || cleanMsg.includes("bot") || cleanMsg.includes("ERROR: [youtube]") || cleanMsg.includes("Could not fetch video info from YouTube"))) {
+      cleanMsg = "YouTube blocked datacenter server access for this video. Please make sure the YT2PDF Slide Companion browser extension is active (green indicator) to capture slides directly from your browser session without bot blocks.";
+    }
+
+    document.getElementById("error-msg").textContent = cleanMsg;
     document.getElementById("submit-btn").disabled = false;
     document.getElementById("url-input").disabled = false;
     document.getElementById("btn-text").textContent = "Convert to PDF";
@@ -3500,6 +3617,13 @@
     selectedSlideSet.clear();
     closeSlideModal();
     localStorage.removeItem("yt2pdf_last_job");
+
+    // Clean URL query params like ?job_id=... from browser history
+    try {
+      const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
+      window.history.replaceState({ path: cleanUrl }, "", cleanUrl);
+    } catch (e) {}
+
     document.getElementById("url-input").value = "";
     document.getElementById("url-input").disabled = false;
     document.getElementById("submit-btn").disabled = false;
@@ -3546,6 +3670,10 @@
             showResult(data, out);
             return;
           } else if (data.stage === "failed") {
+            try {
+              const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
+              window.history.replaceState({ path: cleanUrl }, "", cleanUrl);
+            } catch (e) {}
             showError(data.error || "Processing failed.");
             return;
           } else {
