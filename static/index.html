@@ -2580,26 +2580,76 @@
     } catch(err) { console.warn("Poll error:", err); }
   }
 
-  function downloadSlides() {
+  async function downloadSlides() {
     if (!jobId) return;
     const url = getDownloadUrl(`/api/download/${jobId}`);
+
+    // Strategy 1: Direct link trigger
     const a = document.createElement("a");
     a.href = url;
-    a.setAttribute("download", `slides_${jobId}.pdf`);
+    a.setAttribute("download", `lecture_slides_${jobId}.pdf`);
+    a.target = "_blank";
     document.body.appendChild(a);
     a.click();
-    setTimeout(() => a.remove(), 200);
+    setTimeout(() => a.remove(), 250);
+
+    // Strategy 2 (Guaranteed Fallback): Fetch blob directly to ensure saving even if browser blocks cross-origin link
+    try {
+      const res = await apiFetch(`/api/download/${jobId}`);
+      if (res.ok) {
+        const blob = await res.blob();
+        if (blob && blob.size > 200) {
+          const blobUrl = window.URL.createObjectURL(blob);
+          const bLink = document.createElement("a");
+          bLink.href = blobUrl;
+          bLink.setAttribute("download", `lecture_slides_${jobId}.pdf`);
+          document.body.appendChild(bLink);
+          bLink.click();
+          setTimeout(() => {
+            bLink.remove();
+            window.URL.revokeObjectURL(blobUrl);
+          }, 1500);
+        }
+      }
+    } catch (err) {
+      console.warn("Direct blob download error:", err);
+    }
   }
 
-  function downloadGuide() {
+  async function downloadGuide() {
     if (!jobId) return;
     const url = getDownloadUrl(`/api/download/${jobId}/guide`);
+
+    // Strategy 1: Direct link trigger
     const a = document.createElement("a");
     a.href = url;
     a.setAttribute("download", `study_guide_${jobId}.pdf`);
+    a.target = "_blank";
     document.body.appendChild(a);
     a.click();
-    setTimeout(() => a.remove(), 200);
+    setTimeout(() => a.remove(), 250);
+
+    // Strategy 2: Blob fallback
+    try {
+      const res = await apiFetch(`/api/download/${jobId}/guide`);
+      if (res.ok) {
+        const blob = await res.blob();
+        if (blob && blob.size > 200) {
+          const blobUrl = window.URL.createObjectURL(blob);
+          const bLink = document.createElement("a");
+          bLink.href = blobUrl;
+          bLink.setAttribute("download", `study_guide_${jobId}.pdf`);
+          document.body.appendChild(bLink);
+          bLink.click();
+          setTimeout(() => {
+            bLink.remove();
+            window.URL.revokeObjectURL(blobUrl);
+          }, 1500);
+        }
+      }
+    } catch (err) {
+      console.warn("Direct blob guide download error:", err);
+    }
   }
 
   function showProgress() {

@@ -295,18 +295,25 @@ async def download_slides_pdf(job_id: str):
 
     import json
     meta_file = JOBS_ROOT / job_id / "meta.json"
-    filename = "slides.pdf"
+    filename = "lecture_slides.pdf"
     if meta_file.exists():
-        meta = json.loads(meta_file.read_text())
-        raw_title = meta.get("title", "slides")
-        safe = "".join(c if c.isalnum() or c in " -_" else "_" for c in raw_title)
-        filename = f"{safe[:55].strip()}_slides.pdf"
+        try:
+            meta = json.loads(meta_file.read_text())
+            raw_title = meta.get("video_title") or meta.get("title") or "lecture_slides"
+            safe = "".join(c if c.isalnum() or c in " -_" else "_" for c in raw_title)
+            filename = f"{safe[:55].strip()}_slides.pdf"
+        except Exception:
+            pass
 
     return FileResponse(
         path=str(pdf_path),
         media_type="application/pdf",
         filename=filename,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Expose-Headers": "Content-Disposition",
+            "Cache-Control": "no-cache",
+        },
     )
 
 
@@ -321,16 +328,23 @@ async def download_guide_pdf(job_id: str):
     meta_file = JOBS_ROOT / job_id / "meta.json"
     filename = "study_guide.pdf"
     if meta_file.exists():
-        meta = json.loads(meta_file.read_text())
-        raw_title = meta.get("title", "study_guide")
-        safe = "".join(c if c.isalnum() or c in " -_" else "_" for c in raw_title)
-        filename = f"{safe[:50].strip()}_study_guide.pdf"
+        try:
+            meta = json.loads(meta_file.read_text())
+            raw_title = meta.get("video_title") or meta.get("title") or "study_guide"
+            safe = "".join(c if c.isalnum() or c in " -_" else "_" for c in raw_title)
+            filename = f"{safe[:50].strip()}_study_guide.pdf"
+        except Exception:
+            pass
 
     return FileResponse(
         path=str(pdf_path),
         media_type="application/pdf",
         filename=filename,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Expose-Headers": "Content-Disposition",
+            "Cache-Control": "no-cache",
+        },
     )
 
 
