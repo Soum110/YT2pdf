@@ -7,7 +7,10 @@ const DEFAULT_BACKEND = "https://yt2pdf-214301889618.europe-west1.run.app";
 export default {
   // Scheduled Cron Trigger: Fires every 30 mins to keep the backend awake 24/7
   async scheduled(event, env, ctx) {
-    const backendBase = env?.BACKEND_URL || DEFAULT_BACKEND;
+    let backendBase = env?.BACKEND_URL || DEFAULT_BACKEND;
+    if (backendBase.includes("onrender.com") || backendBase.includes("render.com")) {
+      backendBase = DEFAULT_BACKEND;
+    }
     if (backendBase && !backendBase.includes("localhost") && !backendBase.includes("127.0.0.1")) {
       try {
         const pingUrl = new URL("/api/health", backendBase);
@@ -22,7 +25,10 @@ export default {
 
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    const backendBase = env?.BACKEND_URL || DEFAULT_BACKEND;
+    let backendBase = env?.BACKEND_URL || DEFAULT_BACKEND;
+    if (backendBase.includes("onrender.com") || backendBase.includes("render.com")) {
+      backendBase = DEFAULT_BACKEND;
+    }
 
     // 1. Proxy API requests to Python FastAPI backend
     if (url.pathname.startsWith("/api/")) {
