@@ -2490,6 +2490,35 @@
     }
   }
 
+  const DIRECT_BACKEND = "https://yt2pdf-214301889618.europe-west1.run.app";
+  let activeBackendPrefix = ""; // Default to relative URL on current origin
+
+  async function apiFetch(path, options = {}) {
+    const primaryUrl = activeBackendPrefix ? `${activeBackendPrefix}${path}` : path;
+    try {
+      const res = await fetch(primaryUrl, options);
+      if (!res.ok && (res.status === 502 || res.status === 503 || res.status === 504)) {
+        if (!activeBackendPrefix && DIRECT_BACKEND && !window.location.origin.includes("run.app")) {
+          console.warn(`[Proxy Failover] ${path} returned HTTP ${res.status}. Switching to direct Cloud Run backend.`);
+          activeBackendPrefix = DIRECT_BACKEND;
+          return await fetch(`${activeBackendPrefix}${path}`, options);
+        }
+      }
+      return res;
+    } catch (err) {
+      if (!activeBackendPrefix && DIRECT_BACKEND && !window.location.origin.includes("run.app")) {
+        console.warn(`[Proxy Failover] ${path} network error (${err.message}). Switching to direct Cloud Run backend.`);
+        activeBackendPrefix = DIRECT_BACKEND;
+        return await fetch(`${activeBackendPrefix}${path}`, options);
+      }
+      throw err;
+    }
+  }
+
+  function getDownloadUrl(path) {
+    return (activeBackendPrefix || "") + path;
+  }
+
   async function startJob() {
     const url = document.getElementById("url-input").value.trim();
     if (!url) {
@@ -2502,7 +2531,7 @@
     document.getElementById("btn-text").textContent = "Processing...";
 
     try {
-      const res = await fetch("/api/process", {
+      const res = await apiFetch("/api/process", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ video_url: url }),
@@ -2529,7 +2558,7 @@
   async function pollStatus() {
     if (!jobId) return;
     try {
-      const res = await fetch(`/api/status/${jobId}`);
+      const res = await apiFetch(`/api/status/${jobId}`);
       if (!res.ok) return;
       const contentType = res.headers.get("content-type") || "";
       if (!contentType.includes("application/json")) return;
@@ -2537,7 +2566,7 @@
       updateProgress(data);
       if (data.stage === "completed") {
         clearInterval(pollTimer);
-        const out = await fetch(`/api/outputs/${jobId}`).then(r => r.json()).catch(() => ({ slides_pdf: true, study_guide_pdf: true }));
+        const out = await apiFetch(`/api/outputs/${jobId}`).then(r => r.json()).catch(() => ({ slides_pdf: true, study_guide_pdf: true }));
         showResult(data, out);
       } else if (data.stage === "failed") {
         clearInterval(pollTimer);
@@ -2546,8 +2575,8 @@
     } catch(err) { console.warn("Poll error:", err); }
   }
 
-  function downloadSlides() { if (jobId) window.location.href = `/api/download/${jobId}`; }
-  function downloadGuide()  { if (jobId) window.location.href = `/api/download/${jobId}/guide`; }
+  function downloadSlides() { if (jobId) window.location.href = getDownloadUrl(`/api/download/${jobId}`); }
+  function downloadGuide()  { if (jobId) window.location.href = getDownloadUrl(`/api/download/${jobId}/guide`); }
 
   function showProgress() {
     document.getElementById("progress-section").style.display = "block";
@@ -2573,7 +2602,7 @@
   async function loadSlidePreview(jid) {
     if (!jid) return;
     try {
-      const res = await fetch(`/api/slides/${jid}`);
+      const res = await apiFetch(`/api/slides/${jid}`);
       if (!res.ok) return;
       const data = await res.json();
       allJobSlides = data.slides || [];
@@ -2693,7 +2722,7 @@
     txt.textContent = "Compiling PDF...";
 
     try {
-      const res = await fetch(`/api/rebuild_slides_pdf/${jobId}`, {
+      const res = await apiFetch(`/api/rebuild_slides_pdf/${jobId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ selected_filenames: Array.from(selectedSlideSet) }),
@@ -2829,11 +2858,11 @@
     const savedJob = localStorage.getItem("yt2pdf_last_job");
     if (!savedJob) return;
     try {
-      const res = await fetch(`/api/status/${savedJob}`);
+      const res = await apiFetch(`/api/status/${savedJob}`);
       if (!res.ok) return;
       const data = await res.json();
       if (data.stage === "completed") {
-        const out = await fetch(`/api/outputs/${savedJob}`).then(r => r.json()).catch(() => ({ slides_pdf: true, study_guide_pdf: true }));
+        const out = await apiFetch(`/api/outputs/${savedJob}`).then(r => r.json()).catch(() => ({ slides_pdf: true, study_guide_pdf: true }));
         recentJobData = data;
         recentJobOutputs = out;
         jobId = savedJob;
@@ -2900,12 +2929,12 @@
       localStorage.setItem("yt2pdf_last_job", jobId);
       showProgress();
       try {
-        const res = await fetch(`/api/status/${urlJob}`);
+        const res = await apiFetch(`/api/status/${urlJob}`);
         if (res.ok) {
           const data = await res.json();
           updateProgress(data);
           if (data.stage === "completed") {
-            const out = await fetch(`/api/outputs/${urlJob}`).then(r => r.json()).catch(() => ({ slides_pdf: true, study_guide_pdf: true }));
+            const out = await apiFetch(`/api/outputs/${urlJob}`).then(r => r.json()).catch(() => ({ slides_pdf: true, study_guide_pdf: true }));
             showResult(data, out);
             return;
           } else if (data.stage === "failed") {
