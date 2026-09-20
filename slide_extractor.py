@@ -21,7 +21,9 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
@@ -43,7 +45,7 @@ log = logging.getLogger("extractor")
 
 
 # ---------------------------------------------------------------------------
-# Configuration dataclass
+# Configuration
 # ---------------------------------------------------------------------------
 @dataclass
 class ExtractorConfig:
@@ -56,9 +58,9 @@ class ExtractorConfig:
 
     # --- Pass 2: Gemini AI ---
     gemini_api_key: str = "YOUR_GEMINI_API_KEY_HERE"   # <- Replace this
-    gemini_model: str = "gemini-3.5-flash-lite"         # Fast, generous free tier
-    ai_max_retries: int = 3
-    ai_retry_delay: float = 2.0          # Seconds between retries
+    gemini_model: str = "gemini-2.0-flash"             # Fast, highly capable official model
+    ai_max_retries: int = 2
+    ai_retry_delay: float = 1.0          # Seconds between retries
 
     # --- Output ---
     output_dir: Path = Path("./slides_out")
@@ -226,7 +228,7 @@ def pass1_find_candidates(
             continue
 
         # Compute SSIM (fast because we downscaled to 320px wide)
-        score, _ = ssim(last_gray, gray, full=True)
+        score = ssim(last_gray, gray, full=False)
 
         if progress_cb:
             progress_cb(frame_count, total_sampled, ts)
@@ -276,114 +278,185 @@ Rules:
 GEMINI_USER_PROMPT = "Evaluate this video frame. Is it a presentation slide? Does it have new content compared to the previous slide?"
 
 
-def _encode_image_b64(image_bgr: np.ndarray, quality: int = 85) -> str:
-    """Encode a BGR numpy array to base64 JPEG string."""
-    rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
-    pil_img = Image.fromarray(rgb)
-    # Downscale large frames to save API bandwidth (max 1024px wide)
+def _encode_image_b64(image_bgr: np.ndarray, quality: int = 82) -> str:
+    """Fast C++ OpenCV JPEG encode to base64 string."""
+    h, w = image_bgr.shape[:2]
     max_width = 1024
-    if pil_img.width > max_width:
-        ratio = max_width / pil_img.width
-        pil_img = pil_img.resize(
-            (max_width, int(pil_img.height * ratio)), Image.LANCZOS
-        )
-    buf = io.BytesIO()
-    pil_img.save(buf, format="JPEG", quality=quality)
-    return base64.b64encode(buf.getvalue()).decode("utf-8")
+    if w > max_width:
+        ratio = max_width / float(w)
+        resized = cv2.resize(image_bgr, (max_width, int(h * ratio)), interpolation=cv2.INTER_AREA)
+    else:
+        resized = image_bgr
+    success, enc = cv2.imencode(".jpg", resized, [cv2.IMWRITE_JPEG_QUALITY, quality])
+    if not success:
+        raise ValueError("Failed to encode image to JPEG")
+    return base64.b64encode(enc.tobytes()).decode("utf-8")
 
 
-def _call_gemini(client, model_name: str, image_b64: str, retries: int = 3, retry_delay: float = 2.0) -> dict:
+_ACTIVE_GEMINI_MODEL: Optional[str] = None
+_MODEL_LOCK = threading.Lock()
+PREFERRED_MODELS = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-flash"]
+
+
+def _resolve_working_model(requested_model: str) -> str:
+    global _ACTIVE_GEMINI_MODEL
+    with _MODEL_LOCK:
+        if _ACTIVE_GEMINI_MODEL:
+            return _ACTIVE_GEMINI_MODEL
+    if "3.5" in requested_model or not requested_model or "invalid" in requested_model:
+        return PREFERRED_MODELS[0]
+    return requested_model
+
+
+def _call_gemini(client, model_name: str, image_b64: str, retries: int = 2, retry_delay: float = 1.0) -> dict:
     """
-    Call the Gemini API with the candidate image.
-    Returns the parsed JSON dict from the model or raises on failure.
+    Call the Gemini API with candidate image and automatic multi-model failover.
+    Returns parsed JSON dict or safe fallback.
     """
+    global _ACTIVE_GEMINI_MODEL
     from google.genai import types
 
-    for attempt in range(1, retries + 1):
-        try:
-            response = client.models.generate_content(
-                model=model_name,
-                contents=[
-                    types.Content(
-                        role="user",
-                        parts=[
-                            types.Part(
-                                inline_data=types.Blob(
-                                    mime_type="image/jpeg",
-                                    data=base64.b64decode(image_b64),
-                                )
-                            ),
-                            types.Part(text=GEMINI_USER_PROMPT),
-                        ],
-                    )
-                ],
-                config=types.GenerateContentConfig(
-                    system_instruction=GEMINI_SYSTEM_PROMPT,
-                    temperature=0.0,
-                    max_output_tokens=256,
-                ),
-            )
-            raw_text = response.text.strip()
+    target_model = _resolve_working_model(model_name)
+    candidate_models = [target_model] + [m for m in PREFERRED_MODELS if m != target_model]
 
-            # Strip any accidental markdown fences
-            if raw_text.startswith("```"):
-                parts = raw_text.split("```")
-                raw_text = parts[1] if len(parts) > 1 else raw_text
-                if raw_text.startswith("json"):
-                    raw_text = raw_text[4:]
-                raw_text = raw_text.strip()
+    for model in candidate_models:
+        for attempt in range(1, retries + 1):
+            try:
+                response = client.models.generate_content(
+                    model=model,
+                    contents=[
+                        types.Content(
+                            role="user",
+                            parts=[
+                                types.Part(
+                                    inline_data=types.Blob(
+                                        mime_type="image/jpeg",
+                                        data=base64.b64decode(image_b64),
+                                    )
+                                ),
+                                types.Part(text=GEMINI_USER_PROMPT),
+                            ],
+                        )
+                    ],
+                    config=types.GenerateContentConfig(
+                        system_instruction=GEMINI_SYSTEM_PROMPT,
+                        temperature=0.0,
+                        max_output_tokens=256,
+                    ),
+                )
+                raw_text = response.text.strip() if response.text else ""
+                if raw_text.startswith("```"):
+                    parts = raw_text.split("```")
+                    raw_text = parts[1] if len(parts) > 1 else raw_text
+                    if raw_text.startswith("json"):
+                        raw_text = raw_text[4:]
+                    raw_text = raw_text.strip()
 
-            return json.loads(raw_text)
+                parsed = json.loads(raw_text)
+                with _MODEL_LOCK:
+                    _ACTIVE_GEMINI_MODEL = model
+                return parsed
 
-        except json.JSONDecodeError as e:
-            log.warning("  Attempt %d: JSON parse error — %s", attempt, e)
-        except Exception as e:
-            log.warning("  Attempt %d: API error — %s", attempt, e)
+            except json.JSONDecodeError as e:
+                log.warning("  Model %s Attempt %d: JSON parse error — %s", model, attempt, e)
+            except Exception as e:
+                err_str = str(e).lower()
+                log.warning("  Model %s Attempt %d: API error — %s", model, attempt, e)
+                # If model not found or not supported (404), fail over immediately without burning retries
+                if "not found" in err_str or "404" in err_str or "not supported" in err_str:
+                    log.warning("  Model %s unavailable on API; switching to next fallback...", model)
+                    break
+                if "429" in err_str or "resource_exhausted" in err_str:
+                    time.sleep(1.2)
 
-        if attempt < retries:
-            time.sleep(retry_delay)
+            if attempt < retries:
+                time.sleep(retry_delay)
 
-    log.error("  All retries failed. Defaulting to: is_slide=True, is_new_content=True")
-    return {"is_slide": True, "is_new_content": True, "slide_title": "Unknown Slide"}
+    log.warning("  AI verification defaulted for frame: is_slide=True, is_new_content=True")
+    return {"is_slide": True, "is_new_content": True, "slide_title": "Slide"}
 
 
 def pass2_ai_verify(
     candidates: list,
     config: ExtractorConfig,
     progress_cb: Optional[Callable] = None,
+    max_workers: int = 5,
 ) -> list:
     """
-    Pass 2 — Send each candidate frame to Gemini for verification.
-    Returns only frames where both is_slide and is_new_content are True.
+    Pass 2 — Send candidate frames to Gemini in parallel for high-speed verification.
+    Preserves exact chronological order and gracefully falls back on API unavailability.
     """
-    if config.gemini_api_key == "YOUR_GEMINI_API_KEY_HERE":
-        log.error("No Gemini API key set!")
-        log.error("  Option 1: export GEMINI_API_KEY='your_key' and re-run.")
-        log.error("  Option 2: pass --api-key YOUR_KEY on the command line.")
-        log.error("  Get a free key at: https://aistudio.google.com/app/apikey")
-        sys.exit(1)
+    if not candidates:
+        return []
+
+    if config.gemini_api_key == "YOUR_GEMINI_API_KEY_HERE" or not config.gemini_api_key:
+        log.warning("No Gemini API key configured; keeping all %d candidates.", len(candidates))
+        return [
+            VerifiedSlide(
+                frame_index=c.frame_index,
+                timestamp_sec=c.timestamp_sec,
+                image_or_path=c.image_path,
+                slide_title=f"Slide {i}",
+                is_slide=True,
+                is_new_content=True,
+            )
+            for i, c in enumerate(candidates, 1)
+        ]
 
     try:
         from google import genai
     except ImportError:
-        log.error("google-genai not installed. Run: pip install google-genai")
-        sys.exit(1)
+        log.error("google-genai not installed. Keeping all candidates.")
+        return [
+            VerifiedSlide(
+                frame_index=c.frame_index,
+                timestamp_sec=c.timestamp_sec,
+                image_or_path=c.image_path,
+                slide_title=f"Slide {i}",
+                is_slide=True,
+                is_new_content=True,
+            )
+            for i, c in enumerate(candidates, 1)
+        ]
 
     client = genai.Client(api_key=config.gemini_api_key)
 
-    log.info("=== PASS 2: Gemini AI Verification ===")
-    log.info("Model: %s  |  Candidates to verify: %d", config.gemini_model, len(candidates))
+    total_candidates = len(candidates)
+    log.info("=== PASS 2: High-Speed Parallel AI Verification ===")
+    log.info("Requested model: %s | Total Candidates: %d | Concurrency: %d",
+             config.gemini_model, total_candidates, min(max_workers, total_candidates))
 
-    verified = []
+    verified_by_idx = {}
+    completed_count = 0
+    lock = threading.Lock()
 
-    for i, candidate in enumerate(candidates, 1):
-        log.info("  [%d/%d] Verifying frame @%.1fs ...", i, len(candidates), candidate.timestamp_sec)
-
+    def _verify_one(pos: int, candidate: CandidateFrame):
+        nonlocal completed_count
         img = candidate.image
         if img is None:
-            continue
+            with lock:
+                completed_count += 1
+                if progress_cb:
+                    progress_cb(completed_count, total_candidates)
+            return
+
+        # 1. Fast CV Pre-filter: Check for blank / uniform / solid color frames (std < 6.0)
+        try:
+            small = cv2.resize(img, (64, 36), interpolation=cv2.INTER_AREA)
+            gray_small = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+            std_dev = float(np.std(gray_small))
+            if std_dev < 6.0:
+                log.info("  [%d/%d] Rejected blank/solid frame (std=%.1f)", pos, total_candidates, std_dev)
+                with lock:
+                    completed_count += 1
+                    if progress_cb:
+                        progress_cb(completed_count, total_candidates)
+                return
+        except Exception:
+            pass
+
         image_b64 = _encode_image_b64(img)
-        del img  # Free memory immediately!
+        del img
 
         result = _call_gemini(
             client, config.gemini_model, image_b64,
@@ -392,40 +465,40 @@ def pass2_ai_verify(
 
         is_slide = bool(result.get("is_slide", False))
         is_new_content = bool(result.get("is_new_content", False))
-        slide_title = str(result.get("slide_title", "Untitled Slide"))[:80]
+        slide_title = str(result.get("slide_title", f"Slide {pos}"))[:80]
 
         status = "ACCEPTED" if (is_slide and is_new_content) else "REJECTED"
-        reason = (
-            "not a slide" if not is_slide
-            else "annotation-only (no new content)" if not is_new_content
-            else ""
-        )
-        log.info(
-            "    [%s] is_slide=%s | is_new_content=%s | title='%s'%s",
-            status, is_slide, is_new_content, slide_title,
-            f" -> {reason}" if reason else "",
-        )
+        log.info("  [%d/%d] %s @%.1fs: '%s'", pos, total_candidates, status, candidate.timestamp_sec, slide_title)
 
         if is_slide and is_new_content:
-            verified.append(
-                VerifiedSlide(
-                    frame_index=candidate.frame_index,
-                    timestamp_sec=candidate.timestamp_sec,
-                    image_or_path=candidate.image_path,
-                    slide_title=slide_title,
-                    is_slide=is_slide,
-                    is_new_content=is_new_content,
-                )
+            slide_obj = VerifiedSlide(
+                frame_index=candidate.frame_index,
+                timestamp_sec=candidate.timestamp_sec,
+                image_or_path=candidate.image_path,
+                slide_title=slide_title,
+                is_slide=is_slide,
+                is_new_content=is_new_content,
             )
+            with lock:
+                verified_by_idx[candidate.frame_index] = slide_obj
 
-        if progress_cb:
-            progress_cb(i, len(candidates))
+        with lock:
+            completed_count += 1
+            if progress_cb:
+                progress_cb(completed_count, total_candidates)
 
-        # Courtesy pause between API calls (rate limit)
-        if i < len(candidates):
-            time.sleep(0.3)
+    worker_count = min(max_workers, total_candidates) if total_candidates > 0 else 1
+    with ThreadPoolExecutor(max_workers=worker_count) as pool:
+        futures = [pool.submit(_verify_one, i, c) for i, c in enumerate(candidates, 1)]
+        for f in as_completed(futures):
+            try:
+                f.result()
+            except Exception as e:
+                log.warning("Worker thread exception: %s", e)
 
-    log.info("Pass 2 complete: %d/%d frames verified as unique slides", len(verified), len(candidates))
+    # Reconstruct strictly in original timestamp order
+    verified = [verified_by_idx[c.frame_index] for c in candidates if c.frame_index in verified_by_idx]
+    log.info("Pass 2 complete: %d/%d frames verified as clean slides", len(verified), total_candidates)
     return verified
 
 
@@ -433,25 +506,30 @@ def pass2_ai_verify(
 # Save frames to disk
 # ---------------------------------------------------------------------------
 
-def save_slides(slides: list, output_dir: Path, prefix: str = "slide") -> list:
-    """Save verified slide images as PNG files. Returns list of saved paths."""
+def save_slides(slides: list, output_dir: Path, prefix: str = "slide", max_workers: int = 4) -> list:
+    """Save verified slide images as PNG files concurrently with fast compression."""
     output_dir.mkdir(parents=True, exist_ok=True)
-    saved_paths = []
+    saved_paths = [None] * len(slides)
 
-    for i, slide in enumerate(slides, 1):
-        filename = output_dir / f"{prefix}_{i:03d}_t{int(slide.timestamp_sec):05d}s.png"
+    def _save_single(idx: int, slide):
+        filename = output_dir / f"{prefix}_{idx:03d}_t{int(slide.timestamp_sec):05d}s.png"
         img = slide.image
         if img is not None:
-            rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            pil_img = Image.fromarray(rgb)
-            pil_img.save(str(filename), format="PNG", optimize=True)
-            del img, rgb, pil_img  # Free immediately!
+            # Fast C++ OpenCV write with standard PNG compression (lossless)
+            cv2.imwrite(str(filename), img, [cv2.IMWRITE_PNG_COMPRESSION, 3])
+            del img
             slide.image_path = filename
             slide._image = None
-        saved_paths.append(filename)
+        saved_paths[idx - 1] = filename
         log.info("  Saved: %s  (title: '%s')", filename.name, slide.slide_title)
 
-    return saved_paths
+    worker_count = min(max_workers, len(slides)) if slides else 1
+    with ThreadPoolExecutor(max_workers=worker_count) as pool:
+        futures = [pool.submit(_save_single, i, s) for i, s in enumerate(slides, 1)]
+        for f in as_completed(futures):
+            f.result()
+
+    return [p for p in saved_paths if p is not None]
 
 
 def save_candidates_debug(candidates: list, output_dir: Path) -> None:

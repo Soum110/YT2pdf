@@ -189,6 +189,35 @@ def _encode_image(image_bgr: np.ndarray, max_width: int = 1000, quality: int = 8
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
+PREFERRED_STUDY_MODELS = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-flash"]
+
+
+def _safe_generate_content(client, model: str, contents, config=None, retries: int = 2):
+    """Resilient content generation with automatic model failover and retries."""
+    target_model = model if ("3.5" not in model and model) else PREFERRED_STUDY_MODELS[0]
+    candidate_models = [target_model] + [m for m in PREFERRED_STUDY_MODELS if m != target_model]
+
+    last_err = None
+    for m in candidate_models:
+        for attempt in range(1, retries + 1):
+            try:
+                kwargs = {"model": m, "contents": contents}
+                if config is not None:
+                    kwargs["config"] = config
+                return client.models.generate_content(**kwargs)
+            except Exception as e:
+                err_str = str(e).lower()
+                last_err = e
+                log.warning("Study guide call failed (model=%s, attempt=%d): %s", m, attempt, e)
+                if "not found" in err_str or "404" in err_str or "not supported" in err_str:
+                    break  # Try next model immediately without burning retries
+                if "429" in err_str or "resource_exhausted" in err_str:
+                    time.sleep(1.5)
+                elif attempt < retries:
+                    time.sleep(1.0)
+    raise last_err or RuntimeError("All model attempts failed.")
+
+
 def _extract_slide_formulas(client, gemini_model: str, slides: list, batch_size: int = 5) -> str:
     """
     Rapidly transcribes all visible mathematical formulas, equations, definitions,
@@ -219,7 +248,8 @@ def _extract_slide_formulas(client, gemini_model: str, slides: list, batch_size:
 Format clearly by Slide Number."""))
 
         try:
-            resp = client.models.generate_content(
+            resp = _safe_generate_content(
+                client=client,
                 model=gemini_model,
                 contents=[types.Content(role="user", parts=parts)],
                 config=types.GenerateContentConfig(temperature=0.1, max_output_tokens=2048),
@@ -311,7 +341,8 @@ Return JSON:
 
         try:
             image_b64 = _encode_image(slide.image)
-            resp = client.models.generate_content(
+            resp = _safe_generate_content(
+                client=client,
                 model=model,
                 contents=[
                     types.Content(
@@ -465,7 +496,8 @@ RULES:
 4. Do NOT call plt.show(). Call plt.close('all') after savefig.
 5. Provide clear LaTeX labels on axes and curves."""
 
-            resp = client.models.generate_content(
+            resp = _safe_generate_content(
+                client=client,
                 model=gemini_model,
                 contents=custom_prompt,
             )
@@ -570,7 +602,7 @@ def generate_study_guide_content(
     total_duration: float,
     gemini_api_key: str,
     crops_dir: Optional[Path] = None,
-    gemini_model: str = "gemini-3.5-flash-lite",
+    gemini_model: str = "gemini-2.0-flash",
     progress_cb: Optional[Callable] = None,
 ) -> LectureStudyGuide:
     """
@@ -647,7 +679,8 @@ Ensure that EVERY formula shown on the slides is incorporated with complete deri
     lecture_summary = ""
 
     try:
-        resp = client.models.generate_content(
+        resp = _safe_generate_content(
+            client=client,
             model=gemini_model,
             contents=user_prompt,
             config=types.GenerateContentConfig(

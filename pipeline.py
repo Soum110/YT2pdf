@@ -433,7 +433,7 @@ def run_pipeline(job_id: str, video_url: str, jobs_root: Path, gemini_api_key: s
             ssim_threshold=0.85,
             debounce_seconds=3,
             gemini_api_key=gemini_api_key,
-            gemini_model="gemini-3.5-flash-lite",
+            gemini_model="gemini-2.0-flash",
             output_dir=slides_dir,
             save_candidates=False,
         )
@@ -556,7 +556,7 @@ def run_pipeline(job_id: str, video_url: str, jobs_root: Path, gemini_api_key: s
                 total_duration=float(duration),
                 gemini_api_key=gemini_api_key,
                 crops_dir=crops_dir,
-                gemini_model="gemini-3.5-flash-lite",
+                gemini_model="gemini-2.0-flash",
                 progress_cb=guide_cb,
             )
 
@@ -682,7 +682,7 @@ def run_pipeline_from_frames(
             _write_status(job_dir, "ai_verifying", 50, f"AI verifying {len(candidates)} frames...")
             config = ExtractorConfig(
                 gemini_api_key=gemini_api_key,
-                gemini_model="gemini-3.5-flash-lite",
+                gemini_model="gemini-2.0-flash",
                 output_dir=slides_dir,
             )
 
@@ -750,7 +750,7 @@ def run_pipeline_from_frames(
                     total_duration=float(duration),
                     gemini_api_key=gemini_api_key,
                     crops_dir=crops_dir,
-                    gemini_model="gemini-3.5-flash-lite",
+                    gemini_model="gemini-2.0-flash",
                 )
                 from pdf_study_guide import build_study_guide_pdf
                 guide_pdf_path = job_dir / "study_guide.pdf"
