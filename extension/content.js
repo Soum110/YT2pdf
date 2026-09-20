@@ -247,10 +247,9 @@
       }
 
       const jobId = uploadResult.job_id;
-      let destinationUrl = `https://yt2pdfs.com/?job_id=${jobId}`;
-      if (uploadResult.backend_base && (uploadResult.backend_base.includes("localhost") || uploadResult.backend_base.includes("127.0.0.1"))) {
-        destinationUrl = `${uploadResult.backend_base}/?job_id=${jobId}`;
-      }
+      // Open the exact backend instance that received and processed the slides
+      const base = uploadResult.backend_base || "https://yt2pdf-214301889618.europe-west1.run.app";
+      const destinationUrl = `${base}/?job_id=${jobId}`;
 
       buttonEl.innerHTML = `
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2BA640" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
