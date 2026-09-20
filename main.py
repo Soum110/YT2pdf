@@ -21,7 +21,7 @@ import aiofiles
 from typing import Any, Dict, List, Optional
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, HttpUrl
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -612,8 +612,14 @@ async def health():
 
 
 @app.api_route("/", methods=["GET", "HEAD"])
-async def serve_index():
-    """Serve index.html with strict no-cache headers so browser always gets latest UI."""
+async def serve_index(request: Request):
+    """Serve index.html with strict no-cache headers or redirect to canonical domain."""
+    host = request.headers.get("host", "")
+    forwarded_host = request.headers.get("x-forwarded-host", "")
+    if "run.app" in host and "yt2pdfs.com" not in forwarded_host:
+        query = str(request.query_params)
+        target = f"https://yt2pdfs.com/?{query}" if query else "https://yt2pdfs.com"
+        return RedirectResponse(url=target, status_code=301)
     response = FileResponse("static/index.html")
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     response.headers["Pragma"] = "no-cache"

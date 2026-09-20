@@ -1,6 +1,11 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <script>
+    if (window.location.hostname.endsWith(".run.app") || window.location.hostname.endsWith(".workers.dev")) {
+      window.location.replace("https://yt2pdfs.com" + window.location.pathname + window.location.search + window.location.hash);
+    }
+  </script>
   <!-- Google tag (gtag.js) -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-4F8BNW2XZB"></script>
   <script>

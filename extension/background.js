@@ -4,8 +4,8 @@
  */
 
 const BACKEND_URLS = [
-  "https://yt2pdf-214301889618.europe-west1.run.app",
   "https://yt2pdfs.com",
+  "https://yt2pdf-214301889618.europe-west1.run.app",
   "http://localhost:8080",
   "http://localhost:8000",
   "http://127.0.0.1:8080",
