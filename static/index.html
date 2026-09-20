@@ -1194,65 +1194,44 @@
     }
 
     .companion-modal-body {
-      padding: 24px;
-      overflow-y: auto;
-      max-height: calc(85vh - 70px);
+      padding: 20px 24px 24px;
     }
-    .trust-badge-row {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 12px;
-      margin: 18px 0 20px 0;
-    }
-    .trust-card {
+    .why-box {
       background: var(--canvas-soft);
-      border: 1px solid var(--hairline-soft);
-      border-radius: 10px;
-      padding: 14px;
-    }
-    .trust-card-header {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-weight: 650;
-      font-size: 13px;
-      color: var(--ink);
-      margin-bottom: 6px;
-    }
-    .trust-card-desc {
-      font-size: 12px;
-      color: var(--text-muted);
-      line-height: 1.45;
-    }
-    .step-guide-box {
-      background: var(--canvas-soft);
-      border: 1px solid var(--hairline-soft);
+      border: 1px solid var(--hairline);
       border-radius: 12px;
-      padding: 18px;
+      padding: 14px 16px;
       margin-bottom: 20px;
     }
-    .step-guide-title {
-      font-size: 14px;
+    .why-title {
+      font-size: 13px;
       font-weight: 700;
       color: var(--ink);
-      margin-bottom: 12px;
+      margin-bottom: 5px;
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
     }
-    .step-list {
+    .why-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.45;
+      margin: 0;
+    }
+    .steps-container {
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 14px;
+      margin-bottom: 22px;
     }
-    .step-row {
+    .step-item {
       display: flex;
       align-items: flex-start;
-      gap: 12px;
+      gap: 14px;
     }
-    .step-number {
-      width: 24px;
-      height: 24px;
+    .step-num {
+      width: 26px;
+      height: 26px;
       border-radius: 50%;
       background: var(--ink);
       color: var(--canvas);
@@ -1262,19 +1241,45 @@
       align-items: center;
       justify-content: center;
       flex-shrink: 0;
-      margin-top: 2px;
+      margin-top: 1px;
     }
-    .step-text {
-      font-size: 13px;
+    .step-info {
+      flex: 1;
+    }
+    .step-head {
+      font-size: 13.5px;
+      font-weight: 650;
       color: var(--ink);
-      line-height: 1.45;
+      margin-bottom: 2px;
+    }
+    .step-sub {
+      font-size: 12.5px;
+      color: var(--text-muted);
+      line-height: 1.4;
+    }
+    .step-sub code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11.5px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: var(--canvas-soft);
+      border: 1px solid var(--hairline);
+      color: var(--ink);
+    }
+    .companion-modal-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding-top: 16px;
+      border-top: 1px solid var(--hairline-soft);
     }
 
     @media (max-width: 640px) {
       .btn-companion-nav span { display: none; }
       .companion-promo-banner { flex-direction: column; align-items: flex-start; }
       .companion-modal-body { padding: 16px; }
-      .trust-badge-row { grid-template-columns: 1fr; }
+      .companion-modal-actions { flex-direction: column; align-items: stretch; }
     }
 
     /* ── Mobbin Polarity Inversion Footer ── */
@@ -2377,69 +2382,65 @@
     </div>
   </div>
 
-  <!-- Companion Extension Trust Modal -->
+  <!-- Companion Extension Modal -->
   <div class="modal-backdrop" id="companion-modal" onclick="closeCompanionModal(event)">
-    <div class="modal-surface" style="max-width: 580px;" onclick="event.stopPropagation()">
+    <div class="modal-surface" style="max-width: 500px;" onclick="event.stopPropagation()">
       <div class="modal-top">
-        <div style="display:flex; align-items:center; gap:10px;">
+        <div style="display:flex; align-items:center; gap:9px;">
           <img src="/brand-icon.png" width="22" height="22" alt="YT2PDF" style="border-radius:4px;" />
-          <div class="modal-title">YT2PDF Slide Companion Extension</div>
+          <div class="modal-title">Chrome Companion Extension</div>
         </div>
         <button class="modal-close" onclick="closeCompanionModal()" title="Close (Esc)">&times;</button>
       </div>
 
       <div class="companion-modal-body">
-        <!-- Technical Explanation of Server Restrictions (Yellow Box) -->
-        <div style="background:rgba(255,160,0,0.08); border:1px solid rgba(255,160,0,0.25); border-radius:10px; padding:16px; margin-bottom:18px;">
-          <div style="font-size:13.5px; font-weight:700; color:#E68A00; margin-bottom:6px; display:flex; align-items:center; gap:6px;">
-            <span>ℹ️</span> Why does YT2PDFS recommend the companion extension?
-          </div>
-          <p style="font-size:12.5px; color:var(--ink); line-height:1.5;">
-            YouTube aggressively restricts cloud datacenters (like Google Cloud, AWS, and Render) from streaming video data. When you use the web converter alone, YouTube’s anti-bot system occasionally flags the cloud server's IP address. By capturing video frames right inside your browser with this lightweight extension, <strong>YouTube sees a normal human viewer</strong>, eliminating bot blocks forever.
+        <!-- Why Users Need It -->
+        <div class="why-box">
+          <div class="why-title">Why you need this</div>
+          <p class="why-desc">
+            YouTube often blocks cloud servers from capturing presentation slides. This free extension captures frames directly inside your browser with 100% reliability and zero bot blocks.
           </p>
         </div>
 
-        <!-- 3-Step Install Guide -->
-        <div class="step-guide-box">
-          <div class="step-guide-title">
-            <span>🚀</span> Quick 3-Step Setup
+        <!-- 3-Step Setup -->
+        <div class="steps-container">
+          <div class="step-item">
+            <div class="step-num">1</div>
+            <div class="step-info">
+              <div class="step-head">Download &amp; Extract</div>
+              <div class="step-sub">Download the extension below and unzip the <code>.zip</code> file on your computer.</div>
+            </div>
           </div>
-          <div class="step-list">
-            <div class="step-row">
-              <div class="step-number">1</div>
-              <div class="step-text">
-                <strong>Install Extension:</strong> Click <strong>"Add to Chrome"</strong> below to open our Chrome Web Store page.
-              </div>
+
+          <div class="step-item">
+            <div class="step-num">2</div>
+            <div class="step-info">
+              <div class="step-head">Open Extensions</div>
+              <div class="step-sub">Go to <code>chrome://extensions</code> in your browser and enable <strong>Developer mode</strong> (top-right toggle).</div>
             </div>
-            <div class="step-row">
-              <div class="step-number">2</div>
-              <div class="step-text">
-                <strong>Confirm:</strong> Click the blue <strong>"Add to Chrome"</strong> button on the Web Store to install it in seconds.
-              </div>
-            </div>
-            <div class="step-row">
-              <div class="step-number">3</div>
-              <div class="step-text">
-                <strong>Extract Slides:</strong> Open any YouTube video and click <strong>[📄 PDF Slides]</strong>, or paste any video link directly here on YT2PDFS!
-              </div>
+          </div>
+
+          <div class="step-item">
+            <div class="step-num">3</div>
+            <div class="step-info">
+              <div class="step-head">Load Unpacked</div>
+              <div class="step-sub">Click <strong>Load unpacked</strong> (top-left button) and select the unzipped <code>extension</code> folder.</div>
             </div>
           </div>
         </div>
 
-        <!-- Call to Action Buttons -->
-        <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; margin-top:18px; padding-top:16px; border-top:1px solid var(--hairline-soft);">
-          <a id="cws-install-link" href="https://chromewebstore.google.com/detail/yt2pdf-slide-companion" target="_blank" rel="noopener" class="btn-primary" style="text-decoration:none; padding:11px 22px; font-size:13.5px; font-weight:600; display:inline-flex; align-items:center; gap:8px; background:#1a73e8; border-color:#1a73e8; color:#ffffff;">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="10"></circle>
-              <circle cx="12" cy="12" r="4"></circle>
-              <line x1="21.17" y1="8" x2="12" y2="8"></line>
-              <line x1="3.95" y1="6.06" x2="8.54" y2="14"></line>
-              <line x1="10.88" y1="21.94" x2="15.46" y2="14"></line>
+        <!-- Action Buttons -->
+        <div class="companion-modal-actions">
+          <a href="/static/yt2pdf-extension.zip" download="yt2pdf-extension.zip" class="btn-primary" style="text-decoration:none; padding:10px 18px; font-size:13px; font-weight:600; display:inline-flex; align-items:center; gap:8px;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
             </svg>
-            <span>Add to Chrome ↗</span>
+            <span>Download Extension (.zip)</span>
           </a>
           <button class="btn-outline" onclick="closeCompanionModal()" style="font-size:12.5px; padding:9px 18px;">
-            Got it
+            Close
           </button>
         </div>
       </div>
