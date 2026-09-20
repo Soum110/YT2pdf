@@ -45,7 +45,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       chrome.tabs.create({
         url: target.toString(),
-        active: true,
+        active: false,
         muted: true
       }, (tab) => {
         if (chrome.runtime.lastError || !tab) {

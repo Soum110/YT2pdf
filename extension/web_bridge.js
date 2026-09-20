@@ -97,6 +97,8 @@
 
   // Also listen for ping requests from webpage
   window.addEventListener("YT2PDF_PING", () => {
+    document.documentElement.dataset.yt2pdfCompanion = "active";
+    window.__YT2PDF_COMPANION_ACTIVE__ = true;
     window.dispatchEvent(new CustomEvent("YT2PDF_PONG", {
       detail: { version: "1.0.0", active: true }
     }));

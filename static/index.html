@@ -2937,9 +2937,22 @@
     document.getElementById("submit-btn").disabled = true;
     document.getElementById("url-input").disabled = true;
 
-    const isCompanionActive = document.documentElement.dataset.yt2pdfCompanion === "active" ||
-                              document.documentElement.getAttribute("data-yt2pdf-companion") === "active" ||
-                              window.__YT2PDF_COMPANION_ACTIVE__ === true;
+    let isCompanionActive = document.documentElement.dataset.yt2pdfCompanion === "active" ||
+                            document.documentElement.getAttribute("data-yt2pdf-companion") === "active" ||
+                            window.__YT2PDF_COMPANION_ACTIVE__ === true;
+
+    if (!isCompanionActive) {
+      await new Promise((resolve) => {
+        const onPong = () => {
+          window.removeEventListener("YT2PDF_PONG", onPong);
+          isCompanionActive = true;
+          resolve();
+        };
+        window.addEventListener("YT2PDF_PONG", onPong);
+        window.dispatchEvent(new CustomEvent("YT2PDF_PING"));
+        setTimeout(resolve, 350);
+      });
+    }
 
     if (isCompanionActive) {
       document.getElementById("btn-text").textContent = "Extracting...";
@@ -2947,14 +2960,14 @@
       updateProgress({
         stage: "fetch",
         progress: 15,
-        message: "⚡ Companion Extension is capturing presentation slides directly in your browser..."
+        message: "⚡ Companion Extension is capturing presentation slides in a silent background tab..."
       });
 
       try {
         const extractionPromise = new Promise((resolve, reject) => {
           const timeout = setTimeout(() => {
             window.removeEventListener("YT2PDF_EXTRACTION_RESULT", handler);
-            reject(new Error("Companion extraction timed out. Falling back to server conversion."));
+            reject(new Error("Companion extraction timed out. Please check if the video is available and try again."));
           }, 35000);
 
           function handler(evt) {
@@ -2993,12 +3006,9 @@
         pollTimer = setInterval(pollStatus, 1500);
         return;
       } catch (companionErr) {
-        console.warn("[Website] Companion extraction fallback triggered:", companionErr.message);
-        updateProgress({
-          stage: "fetch",
-          progress: 20,
-          message: "Switching to cloud server conversion..."
-        });
+        console.warn("[Website] Companion extraction error:", companionErr.message);
+        showError(`Companion Extension Error: ${companionErr.message}`);
+        return;
       }
     }
 

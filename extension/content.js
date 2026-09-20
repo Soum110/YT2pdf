@@ -338,7 +338,7 @@
   }
 
   // ─────────────────────────────────────────────
-  // High-Speed Slide Extraction Mode (Website Automation)
+  // High-Speed Silent Background Extraction Mode
   // ─────────────────────────────────────────────
   const isHeadless = new URLSearchParams(window.location.search).get("yt2pdf_headless") === "1";
 
@@ -353,46 +353,61 @@
   }
 
   async function runHeadlessExtraction() {
-    console.log("[YT2PDF Companion] Initializing high-speed slide extraction...");
+    console.log("[YT2PDF Companion] Initializing silent background extraction...");
 
-    // Render luxury HUD banner on the YouTube page so user sees progress
-    const hud = document.createElement("div");
-    hud.id = "yt2pdf-hud-overlay";
-    hud.innerHTML = `
-      <div style="position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:9999999;background:rgba(15,23,42,0.94);backdrop-filter:blur(16px);border:1px solid rgba(99,102,241,0.45);border-radius:14px;padding:12px 22px;box-shadow:0 20px 40px rgba(0,0,0,0.65),0 0 25px rgba(99,102,241,0.3);display:flex;flex-direction:column;gap:8px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;min-width:340px;color:#fff;pointer-events:none;">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;">
-          <div style="display:flex;align-items:center;gap:10px;">
-            <div style="width:10px;height:10px;border-radius:50%;background:#10b981;box-shadow:0 0 10px #10b981;animation:yt2pdf-pulse 1.2s infinite;"></div>
-            <span style="font-weight:700;font-size:13px;letter-spacing:-0.01em;color:#f8fafc;">YT2PDF Slide Companion</span>
-          </div>
-          <span id="yt2pdf-hud-count" style="font-size:12px;font-weight:600;color:#818cf8;">Initializing...</span>
-        </div>
-        <div style="font-size:11px;color:#94a3b8;" id="yt2pdf-hud-desc">Extracting presentation slides. Tab closes automatically in ~3s.</div>
-        <div style="height:4px;background:rgba(255,255,255,0.1);border-radius:99px;overflow:hidden;">
-          <div id="yt2pdf-hud-bar" style="width:8%;height:100%;background:linear-gradient(90deg,#6366f1,#10b981);transition:width 0.18s cubic-bezier(0.4,0,0.2,1);"></div>
-        </div>
-      </div>
-      <style>
-        @keyframes yt2pdf-pulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:0.4; transform:scale(0.85); } }
-      </style>
-    `;
-    document.documentElement.appendChild(hud);
+    // 1. Dedicated inline Web Worker to completely bypass Chrome's background tab timer throttling
+    let unthrottledSleep = (ms) => new Promise(r => setTimeout(r, ms));
+    try {
+      const workerBlob = new Blob([
+        "self.onmessage = function(e) { setTimeout(function() { self.postMessage(e.data); }, e.data.ms); };"
+      ], { type: "application/javascript" });
+      const timerWorker = new Worker(URL.createObjectURL(workerBlob));
+      unthrottledSleep = function(ms) {
+        return new Promise((resolve) => {
+          const id = Math.random();
+          const handler = (e) => {
+            if (e.data && e.data.id === id) {
+              timerWorker.removeEventListener("message", handler);
+              resolve();
+            }
+          };
+          timerWorker.addEventListener("message", handler);
+          timerWorker.postMessage({ id, ms });
+        });
+      };
+    } catch(e) {
+      console.warn("[YT2PDF Companion] Web Worker timer fallback:", e);
+    }
+
+    // 2. Activate inaudible AudioContext to prevent Chromium from throttling background video decoding
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (AudioCtx) {
+        const ac = new AudioCtx();
+        const osc = ac.createOscillator();
+        const gain = ac.createGain();
+        gain.gain.value = 0.0001; // Silent / inaudible
+        osc.connect(gain);
+        gain.connect(ac.destination);
+        osc.start();
+      }
+    } catch(e) {}
 
     let video = null;
     let resolvedDuration = 0;
     const waitStart = Date.now();
 
-    // Actively wake up YouTube player & resolve duration
+    // 3. Actively wake up YouTube player & resolve duration
     while (Date.now() - waitStart < 12000) {
       video = document.querySelector("video.html5-main-video");
 
-      // 1. Resolve duration from meta tag if available
+      // Resolve duration from meta tag if available
       if (!resolvedDuration) {
         const metaDur = document.querySelector('meta[itemprop="duration"]')?.getAttribute("content");
         if (metaDur) resolvedDuration = parseISO8601(metaDur);
       }
 
-      // 2. Resolve duration from movie_player API
+      // Resolve duration from movie_player API
       if (!resolvedDuration) {
         const mp = document.getElementById("movie_player");
         if (mp && typeof mp.getDuration === "function") {
@@ -401,7 +416,7 @@
         }
       }
 
-      // 3. Resolve duration & kickstart video playback
+      // Keep video active & playing muted so decoder never freezes
       if (video) {
         video.muted = true;
         video.play().catch(() => {});
@@ -417,7 +432,7 @@
       }
 
       // Auto-click play button if needed
-      const playBtn = document.querySelector(".ytp-large-play-button");
+      const playBtn = document.querySelector(".ytp-large-play-button, .ytp-play-button");
       if (playBtn) {
         try { playBtn.click(); } catch(e) {}
       }
@@ -431,24 +446,22 @@
       if (video && resolvedDuration > 0) {
         break;
       }
-      await new Promise(r => setTimeout(r, 200));
+      await unthrottledSleep(200);
     }
 
     if (!video || !resolvedDuration) {
       console.warn("[YT2PDF Companion] Video element or duration not ready after 12s.");
-      hud.remove();
       safeSendRuntimeMessage({
         action: "headless_extraction_failed",
-        error: "Unable to load YouTube video stream. Falling back to server pipeline."
+        error: "Unable to load YouTube video stream in silent background tab."
       });
       return;
     }
 
-    // Silence audio and pause video immediately
+    // Keep video muted and playing so Chromium continues decoding frames on seek
     video.muted = true;
     try {
       await video.play().catch(() => {});
-      video.pause();
     } catch (e) {}
 
     try {
@@ -460,17 +473,17 @@
       const videoTitle = titleEl ? (titleEl.innerText || titleEl.getAttribute("content") || "").trim() : document.title.replace(" - YouTube", "").trim();
       const cleanUrl = window.location.href.replace(/([&?])yt2pdf_headless=1&?/, "$1").replace(/[?&]$/, "");
 
-      let step = 10;
-      if (duration > 3600) step = 45;
-      else if (duration > 1800) step = 30;
-      else if (duration > 600) step = 15;
-      else step = 8;
+      let step = 12;
+      if (duration > 3600) step = 50;
+      else if (duration > 1800) step = 35;
+      else if (duration > 600) step = 20;
+      else step = 10;
 
       const samplePoints = [];
       for (let t = 2; t < duration - 2; t += step) {
         samplePoints.push(t);
       }
-      const maxFrames = 28;
+      const maxFrames = 22;
       const finalPoints = samplePoints.length > maxFrames
         ? samplePoints.filter((_, idx) => idx % Math.ceil(samplePoints.length / maxFrames) === 0)
         : samplePoints;
@@ -493,23 +506,18 @@
       for (let i = 0; i < finalPoints.length; i++) {
         const timeTarget = finalPoints[i];
 
-        // Seek to target timestamp with rapid response
-        await new Promise((resolve) => {
-          const onSeeked = () => {
-            video.removeEventListener("seeked", onSeeked);
-            resolve();
-          };
-          video.addEventListener("seeked", onSeeked, { once: true });
-          video.currentTime = timeTarget;
-          setTimeout(resolve, 220);
-        });
-
-        // Update HUD counter and progress bar
-        const hudCount = document.getElementById("yt2pdf-hud-count");
-        const hudBar = document.getElementById("yt2pdf-hud-bar");
-        const pct = Math.round(((i + 1) / finalPoints.length) * 85) + 8;
-        if (hudCount) hudCount.textContent = `Slide ${i + 1} / ${finalPoints.length}`;
-        if (hudBar) hudBar.style.width = `${pct}%`;
+        // Seek to target timestamp with unthrottled worker race
+        await Promise.race([
+          new Promise((resolve) => {
+            const onSeeked = () => {
+              video.removeEventListener("seeked", onSeeked);
+              resolve();
+            };
+            video.addEventListener("seeked", onSeeked, { once: true });
+            video.currentTime = timeTarget;
+          }),
+          unthrottledSleep(240)
+        ]);
 
         const activeThumbCanvas = (capturedSlides.length % 2 === 0) ? thumbCanvasA : thumbCanvasB;
         const prevThumbCanvas = (capturedSlides.length % 2 === 0) ? thumbCanvasB : thumbCanvasA;
@@ -542,12 +550,7 @@
         });
       }
 
-      const hudDesc = document.getElementById("yt2pdf-hud-desc");
-      if (hudDesc) hudDesc.textContent = `Captured ${capturedSlides.length} presentation slides! Transmitting...`;
-      const hudBar = document.getElementById("yt2pdf-hud-bar");
-      if (hudBar) hudBar.style.width = "100%";
-
-      console.log(`[YT2PDF Companion] Extraction complete (${capturedSlides.length} slides). Transmitting...`);
+      console.log(`[YT2PDF Companion] Silent background extraction complete (${capturedSlides.length} slides). Transmitting...`);
 
       let transcriptSegments = [];
       try {
@@ -571,8 +574,7 @@
       });
 
     } catch (err) {
-      console.error("[YT2PDF Companion] Extraction error:", err);
-      hud.remove();
+      console.error("[YT2PDF Companion] Silent extraction error:", err);
       safeSendRuntimeMessage({
         action: "headless_extraction_failed",
         error: err.message

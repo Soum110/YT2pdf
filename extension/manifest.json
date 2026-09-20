@@ -28,7 +28,8 @@
   },
   "host_permissions": [
     "*://*.youtube.com/*",
-    "https://yt2pdfs.com/*",
+    "*://yt2pdfs.com/*",
+    "*://www.yt2pdfs.com/*",
     "https://*.run.app/*",
     "http://localhost/*",
     "http://127.0.0.1/*"
@@ -45,7 +46,8 @@
     },
     {
       "matches": [
-        "https://yt2pdfs.com/*",
+        "*://yt2pdfs.com/*",
+        "*://www.yt2pdfs.com/*",
         "https://*.run.app/*",
         "http://localhost/*",
         "http://127.0.0.1/*"
