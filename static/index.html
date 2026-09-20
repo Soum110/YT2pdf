@@ -2,9 +2,12 @@
 <html lang="en">
 <head>
   <script>
-    if (window.location.hostname.endsWith(".run.app") || window.location.hostname.endsWith(".workers.dev")) {
-      window.location.replace("https://yt2pdfs.com" + window.location.pathname + window.location.search + window.location.hash);
-    }
+    (function() {
+      var h = window.location.hostname.toLowerCase();
+      if (h && h !== "yt2pdfs.com" && h !== "www.yt2pdfs.com" && h !== "localhost" && h !== "127.0.0.1") {
+        window.location.replace("https://yt2pdfs.com" + window.location.pathname + window.location.search + window.location.hash);
+      }
+    })();
   </script>
   <!-- Google tag (gtag.js) -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-4F8BNW2XZB"></script>

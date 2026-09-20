@@ -3,6 +3,7 @@
  */
 
 const DEFAULT_BACKEND = "https://yt2pdf-214301889618.europe-west1.run.app";
+const ALLOWED_HOSTS = new Set(["yt2pdfs.com", "www.yt2pdfs.com"]);
 
 export default {
   // Scheduled Cron Trigger: Fires every 30 mins to keep the backend awake 24/7
@@ -25,6 +26,39 @@ export default {
 
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    const hostname = url.hostname.toLowerCase();
+    const isAllowedHost = ALLOWED_HOSTS.has(hostname) || hostname === "localhost" || hostname === "127.0.0.1";
+
+    // ── 0. Strict Host Restriction & Duplicate Domain Protection ──
+    // Restrict any domain other than yt2pdfs.com and www.yt2pdfs.com (e.g. *.workers.dev, *.run.app)
+    if (!isAllowedHost) {
+      // If a web crawler asks for robots.txt on any unauthorized domain, disallow everything:
+      if (url.pathname === "/robots.txt") {
+        return new Response("User-agent: *\nDisallow: /\n", {
+          status: 200,
+          headers: {
+            "Content-Type": "text/plain; charset=utf-8",
+            "X-Robots-Tag": "noindex, nofollow, noarchive, nosnippet",
+            "Cache-Control": "public, max-age=86400"
+          }
+        });
+      }
+
+      // If it's a programmatic API call (e.g. from companion extension), allow it to proxy, but with strict noindex
+      if (!url.pathname.startsWith("/api/")) {
+        // For all webpage and asset navigation, issue an HTTP 301 Permanent Redirect to canonical domain
+        const canonicalUrl = new URL(url.pathname + url.search + url.hash, "https://yt2pdfs.com");
+        return new Response(null, {
+          status: 301,
+          headers: {
+            "Location": canonicalUrl.toString(),
+            "X-Robots-Tag": "noindex, nofollow, noarchive, nosnippet",
+            "Cache-Control": "public, max-age=86400"
+          }
+        });
+      }
+    }
+
     let backendBase = env?.BACKEND_URL || DEFAULT_BACKEND;
     if (backendBase.includes("onrender.com") || backendBase.includes("render.com")) {
       backendBase = DEFAULT_BACKEND;
@@ -32,14 +66,18 @@ export default {
 
     // Handle CORS preflight requests
     if (request.method === "OPTIONS") {
+      const corsHeaders = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, HEAD",
+        "Access-Control-Allow-Headers": "*",
+        "Access-Control-Max-Age": "86400",
+      };
+      if (!isAllowedHost) {
+        corsHeaders["X-Robots-Tag"] = "noindex, nofollow, noarchive, nosnippet";
+      }
       return new Response(null, {
         status: 204,
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, HEAD",
-          "Access-Control-Allow-Headers": "*",
-          "Access-Control-Max-Age": "86400",
-        }
+        headers: corsHeaders
       });
     }
 
@@ -67,22 +105,29 @@ export default {
         // If backend returned an upstream HTML error (e.g. 502/530 Tunnel expired), wrap in clean JSON
         const contentType = backendResponse.headers.get("content-type") || "";
         if (!backendResponse.ok && !contentType.includes("application/json")) {
+          const errHeaders = {
+            "Content-Type": "application/json; charset=utf-8",
+            "Access-Control-Allow-Origin": "*"
+          };
+          if (!isAllowedHost) {
+            errHeaders["X-Robots-Tag"] = "noindex, nofollow, noarchive, nosnippet";
+          }
           return new Response(JSON.stringify({
             detail: "Backend conversion service is currently offline or unreachable.",
             error: "Upstream gateway error",
             status: backendResponse.status
           }), {
             status: backendResponse.status >= 400 ? backendResponse.status : 502,
-            headers: {
-              "Content-Type": "application/json; charset=utf-8",
-              "Access-Control-Allow-Origin": "*"
-            }
+            headers: errHeaders
           });
         }
 
         // Forward response with CORS header
         const resHeaders = new Headers(backendResponse.headers);
         resHeaders.set("Access-Control-Allow-Origin", "*");
+        if (!isAllowedHost) {
+          resHeaders.set("X-Robots-Tag", "noindex, nofollow, noarchive, nosnippet");
+        }
         return new Response(backendResponse.body, {
           status: backendResponse.status,
           statusText: backendResponse.statusText,
@@ -90,16 +135,20 @@ export default {
         });
 
       } catch (err) {
+        const errHeaders = {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*"
+        };
+        if (!isAllowedHost) {
+          errHeaders["X-Robots-Tag"] = "noindex, nofollow, noarchive, nosnippet";
+        }
         return new Response(JSON.stringify({
           error: "Backend service unreachable",
           message: err.message,
           suggestion: "Ensure your Python backend is running."
         }), {
           status: 502,
-          headers: {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*"
-          }
+          headers: errHeaders
         });
       }
     }
@@ -120,11 +169,21 @@ export default {
     reqHeaders.set("Host", targetUrl.host);
     reqHeaders.set("X-Forwarded-Host", url.host);
     reqHeaders.set("X-Forwarded-Proto", url.protocol.replace(":", ""));
-    return fetch(targetUrl.toString(), {
+    const fallbackRes = await fetch(targetUrl.toString(), {
       method: request.method,
       headers: reqHeaders,
       body: (request.method !== "GET" && request.method !== "HEAD") ? request.body : undefined,
       redirect: "follow"
     });
+    if (!isAllowedHost) {
+      const fbHeaders = new Headers(fallbackRes.headers);
+      fbHeaders.set("X-Robots-Tag", "noindex, nofollow, noarchive, nosnippet");
+      return new Response(fallbackRes.body, {
+        status: fallbackRes.status,
+        statusText: fallbackRes.statusText,
+        headers: fbHeaders
+      });
+    }
+    return fallbackRes;
   }
 };

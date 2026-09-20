@@ -1,7 +1,7 @@
 name = "yt2pdfs"
 main = "worker.js"
 compatibility_date = "2024-09-23"
-workers_dev = true
+workers_dev = false
 
 routes = [
   { pattern = "yt2pdfs.com/*", zone_name = "yt2pdfs.com" },

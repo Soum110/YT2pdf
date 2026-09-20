@@ -51,6 +51,51 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+ALLOWED_HOSTS = {"yt2pdfs.com", "www.yt2pdfs.com", "localhost", "127.0.0.1", "testserver"}
+
+
+@app.middleware("http")
+async def domain_restriction_middleware(request: Request, call_next):
+    # Determine effective host from reverse proxy or direct request
+    raw_host = request.headers.get("x-forwarded-host") or request.headers.get("host") or ""
+    hostname = raw_host.split(":")[0].strip().lower()
+
+    is_allowed = not hostname or hostname in ALLOWED_HOSTS
+
+    if not is_allowed:
+        path = request.url.path
+        # Web crawlers asking for robots.txt on secondary/raw domains get full disallow
+        if path == "/robots.txt":
+            return Response(
+                content="User-agent: *\nDisallow: /\n",
+                media_type="text/plain; charset=utf-8",
+                headers={
+                    "X-Robots-Tag": "noindex, nofollow, noarchive, nosnippet",
+                    "Cache-Control": "public, max-age=86400",
+                },
+            )
+
+        # For regular web navigation, issue an HTTP 301 Permanent Redirect to canonical domain
+        if not path.startswith("/api/"):
+            query_str = f"?{request.url.query}" if request.url.query else ""
+            canonical_url = f"https://yt2pdfs.com{path}{query_str}"
+            return RedirectResponse(
+                url=canonical_url,
+                status_code=301,
+                headers={
+                    "X-Robots-Tag": "noindex, nofollow, noarchive, nosnippet",
+                    "Cache-Control": "public, max-age=86400",
+                },
+            )
+
+    response = await call_next(request)
+
+    # If traffic arrived via unapproved host (e.g. companion API hits backend directly), tag with noindex
+    if not is_allowed:
+        response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive, nosnippet"
+
+    return response
+
 
 def _ensure_pot_server():
     """Starts the bgutil-pot HTTP server on 127.0.0.1:4416 if binary is present."""
