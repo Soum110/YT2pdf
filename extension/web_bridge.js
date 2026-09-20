@@ -115,6 +115,18 @@
     }
   });
 
+  // Forward background extraction progress to webpage
+  try {
+    chrome.runtime.onMessage.addListener((msg) => {
+      if (msg && msg.action === "extraction_progress_update") {
+        window.dispatchEvent(new CustomEvent("YT2PDF_EXTRACTION_PROGRESS", {
+          detail: { current: msg.current, total: msg.total }
+        }));
+        window.postMessage({ type: "YT2PDF_EXTRACTION_PROGRESS", current: msg.current, total: msg.total }, "*");
+      }
+    });
+  } catch (e) {}
+
   // Also listen for ping requests from webpage via CustomEvent
   window.addEventListener("YT2PDF_PING", () => {
     signalActive();

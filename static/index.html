@@ -3064,17 +3064,34 @@
           const timeout = setTimeout(() => {
             if (hasSettled) return;
             hasSettled = true;
-            window.removeEventListener("YT2PDF_EXTRACTION_RESULT", handler);
-            window.removeEventListener("message", msgHandler);
+            cleanupListeners();
             reject(new Error("Slide capture in background tab timed out. Please check that the YouTube video is publicly accessible and try again."));
-          }, 45000);
+          }, 80000);
+
+          function cleanupListeners() {
+            window.removeEventListener("YT2PDF_EXTRACTION_RESULT", handler);
+            window.removeEventListener("YT2PDF_EXTRACTION_PROGRESS", progressHandler);
+            window.removeEventListener("message", msgHandler);
+            clearTimeout(timeout);
+          }
+
+          function progressHandler(evt) {
+            const cur = evt.detail?.current || evt.current || 0;
+            const tot = evt.detail?.total || evt.total || 0;
+            if (tot > 0) {
+              const pct = Math.min(15 + Math.floor((cur / tot) * 65), 80);
+              updateProgress({
+                stage: "slides",
+                progress: pct,
+                message: `Capturing presentation slide ${cur} of ${tot} in background tab...`
+              });
+            }
+          }
 
           function handler(evt) {
             if (hasSettled) return;
             hasSettled = true;
-            window.removeEventListener("YT2PDF_EXTRACTION_RESULT", handler);
-            window.removeEventListener("message", msgHandler);
-            clearTimeout(timeout);
+            cleanupListeners();
             if (evt.detail && evt.detail.success) {
               resolve(evt.detail);
             } else {
@@ -3086,9 +3103,13 @@
             if (e.data?.type === "YT2PDF_EXTRACTION_RESULT") {
               handler({ detail: e.data.detail });
             }
+            if (e.data?.type === "YT2PDF_EXTRACTION_PROGRESS") {
+              progressHandler({ detail: { current: e.data.current, total: e.data.total } });
+            }
           }
 
           window.addEventListener("YT2PDF_EXTRACTION_RESULT", handler);
+          window.addEventListener("YT2PDF_EXTRACTION_PROGRESS", progressHandler);
           window.addEventListener("message", msgHandler);
 
           window.dispatchEvent(new CustomEvent("YT2PDF_START_EXTRACTION", {

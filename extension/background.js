@@ -70,10 +70,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             activeExtractions.delete(tabId);
             pending.sendResponse({
               success: false,
-              error: "Slide extraction timed out. Falling back to server pipeline."
+              error: "Slide extraction timed out. Please check that the video is publicly playable and try again."
             });
           }
-        }, 35000);
+        }, 75000);
 
         activeExtractions.set(tabId, { sendResponse, timeout, originTabId });
       });
@@ -82,6 +82,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     return true; // Keep channel open for async response
+  }
+
+  // 1b. Headless extraction progress forwarding to website
+  if (message.action === "headless_progress") {
+    let tabId = sender.tab?.id;
+    let pending = (tabId && activeExtractions.has(tabId)) ? activeExtractions.get(tabId) : null;
+    if (!pending && activeExtractions.size > 0) {
+      pending = activeExtractions.values().next().value;
+    }
+    if (pending && pending.originTabId) {
+      chrome.tabs.sendMessage(pending.originTabId, {
+        action: "extraction_progress_update",
+        current: message.current,
+        total: message.total
+      }).catch(() => {});
+    }
+    return false;
   }
 
   // 2. Headless tab reported failure

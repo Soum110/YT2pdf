@@ -507,17 +507,17 @@
       const videoTitle = titleEl ? (titleEl.innerText || titleEl.getAttribute("content") || "").trim() : document.title.replace(" - YouTube", "").trim();
       const cleanUrl = window.location.href.replace(/([&?])yt2pdf_headless=1&?/, "$1").replace(/[?&]$/, "");
 
-      let step = 12;
-      if (duration > 3600) step = 50;
-      else if (duration > 1800) step = 35;
-      else if (duration > 600) step = 20;
-      else step = 10;
+      let step = 15;
+      if (duration > 3600) step = 60;
+      else if (duration > 1800) step = 40;
+      else if (duration > 600) step = 25;
+      else step = 12;
 
       const samplePoints = [];
       for (let t = 2; t < duration - 2; t += step) {
         samplePoints.push(t);
       }
-      const maxFrames = 22;
+      const maxFrames = 15;
       const finalPoints = samplePoints.length > maxFrames
         ? samplePoints.filter((_, idx) => idx % Math.ceil(samplePoints.length / maxFrames) === 0)
         : samplePoints;
@@ -540,6 +540,13 @@
       for (let i = 0; i < finalPoints.length; i++) {
         const timeTarget = finalPoints[i];
 
+        // Send real-time extraction progress to web page
+        safeSendRuntimeMessage({
+          action: "headless_progress",
+          current: i + 1,
+          total: finalPoints.length
+        });
+
         // Seek to target timestamp with unthrottled worker race
         await Promise.race([
           new Promise((resolve) => {
@@ -550,9 +557,9 @@
             video.addEventListener("seeked", onSeeked, { once: true });
             video.currentTime = timeTarget;
           }),
-          unthrottledSleep(280)
+          unthrottledSleep(240)
         ]);
-        await unthrottledSleep(50);
+        await unthrottledSleep(30);
 
         const activeThumbCanvas = (capturedSlides.length % 2 === 0) ? thumbCanvasA : thumbCanvasB;
         const prevThumbCanvas = (capturedSlides.length % 2 === 0) ? thumbCanvasB : thumbCanvasA;
@@ -571,7 +578,7 @@
           capturedSlides.push({
             timestamp: timeTarget,
             time_formatted: `${Math.floor(timeTarget / 60)}:${String(timeTarget % 60).padStart(2, "0")}`,
-            data: captureCanvas.toDataURL("image/jpeg", 0.78)
+            data: captureCanvas.toDataURL("image/jpeg", 0.72)
           });
         }
       }
@@ -581,7 +588,7 @@
         capturedSlides.push({
           timestamp: 0,
           time_formatted: "0:00",
-          data: captureCanvas.toDataURL("image/jpeg", 0.78)
+          data: captureCanvas.toDataURL("image/jpeg", 0.72)
         });
       }
 
@@ -589,7 +596,10 @@
 
       let transcriptSegments = [];
       try {
-        transcriptSegments = await extractTranscriptFromPage();
+        transcriptSegments = await Promise.race([
+          extractTranscriptFromPage(),
+          unthrottledSleep(2000).then(() => [])
+        ]);
       } catch (trErr) {
         console.warn("[YT2PDF Companion] Transcript extraction error:", trErr);
       }
