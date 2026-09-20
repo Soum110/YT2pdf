@@ -188,6 +188,32 @@ def _get_po_token(video_id: Optional[str] = None) -> Optional[str]:
     return None
 
 
+def _fetch_oembed(video_id: str) -> Optional[dict]:
+    """Instant oEmbed lookup via YouTube's unauthenticated public API (50ms)."""
+    if not video_id:
+        return None
+    try:
+        url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+        )
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            if resp.status == 200:
+                data = json.loads(resp.read().decode("utf-8"))
+                return {
+                    "title": data.get("title", "YouTube Lecture"),
+                    "uploader": data.get("author_name", ""),
+                    "thumbnail": data.get("thumbnail_url", f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"),
+                    "duration": 0
+                }
+    except Exception as e:
+        log.debug("oEmbed fetch failed for video %s: %s", video_id, e)
+    return None
+
+
 def _build_ydl_opts_base(extra: dict = None, video_id: Optional[str] = None) -> list[dict]:
     """
     Returns a list of yt-dlp option dicts to try in order.
@@ -199,7 +225,10 @@ def _build_ydl_opts_base(extra: dict = None, video_id: Optional[str] = None) -> 
         "no_warnings": True,
         "noplaylist": True,
         "noprogress": True,
-        "socket_timeout": 20,
+        "socket_timeout": 8,
+        "retries": 1,
+        "fragment_retries": 1,
+        "extractor_retries": 1,
         "source_address": "0.0.0.0",
     }
 
@@ -233,10 +262,27 @@ def _build_ydl_opts_base(extra: dict = None, video_id: Optional[str] = None) -> 
 
     variants = []
 
+    # 1. Top priority: Authenticated cookies variants (if valid cookies exist)
+    if has_valid_cookies and "cookiefile" in base:
+        v_c_web = dict(base)
+        v_c_web["extractor_args"] = {"youtube": {"player_client": ["web"]}}
+        v_c_web["logger"] = _YtdlpLogger()
+        variants.append(v_c_web)
+
+        v_c_vr = dict(base)
+        v_c_vr["extractor_args"] = {"youtube": {"player_client": ["android_vr"]}}
+        v_c_vr["logger"] = _YtdlpLogger()
+        variants.append(v_c_vr)
+
+        v_c_mweb = dict(base)
+        v_c_mweb["extractor_args"] = {"youtube": {"player_client": ["mweb"]}}
+        v_c_mweb["logger"] = _YtdlpLogger()
+        variants.append(v_c_mweb)
+
     base_no_cookies = dict(base)
     base_no_cookies.pop("cookiefile", None)
 
-    # 1. Top priority: Web client with genuine BotGuard Proof-of-Origin (PO) Token
+    # 2. Web client with BotGuard PO Token if available
     po_token = _get_po_token(video_id)
     if po_token:
         v_po = dict(base_no_cookies)
@@ -249,34 +295,17 @@ def _build_ydl_opts_base(extra: dict = None, video_id: Optional[str] = None) -> 
         v_po["logger"] = _YtdlpLogger()
         variants.append(v_po)
 
-    # 2. android_vr client without cookies (proven bypass for datacenter IPs)
+    # 3. android_vr client without cookies
     v_vr = dict(base_no_cookies)
     v_vr["extractor_args"] = {"youtube": {"player_client": ["android_vr"]}}
     v_vr["logger"] = _YtdlpLogger()
     variants.append(v_vr)
 
-    # 3. Android client without cookies
+    # 4. Android client without cookies
     va = dict(base_no_cookies)
     va["extractor_args"] = {"youtube": {"player_client": ["android"]}}
     va["logger"] = _YtdlpLogger()
     variants.append(va)
-
-    # 4. Authenticated cookies variants (if cookies are provided)
-    if has_valid_cookies and "cookiefile" in base:
-        v_c_vr = dict(base)
-        v_c_vr["extractor_args"] = {"youtube": {"player_client": ["android_vr"]}}
-        v_c_vr["logger"] = _YtdlpLogger()
-        variants.append(v_c_vr)
-
-        v_c_web = dict(base)
-        v_c_web["extractor_args"] = {"youtube": {"player_client": ["web"]}}
-        v_c_web["logger"] = _YtdlpLogger()
-        variants.append(v_c_web)
-
-        v_c_mweb = dict(base)
-        v_c_mweb["extractor_args"] = {"youtube": {"player_client": ["mweb"]}}
-        v_c_mweb["logger"] = _YtdlpLogger()
-        variants.append(v_c_mweb)
 
     # 5. Fallback without cookies (mweb / default)
     vm = dict(base_no_cookies)
@@ -292,22 +321,33 @@ def _build_ydl_opts_base(extra: dict = None, video_id: Optional[str] = None) -> 
 
 
 def _get_video_info(url: str) -> dict:
-    """Fetch video title and duration without downloading."""
+    """Fetch video title and duration with instant oEmbed lookup and fail-fast yt-dlp timeout."""
     import yt_dlp
+    import concurrent.futures
 
     video_id = _extract_video_id(url)
+    oembed_info = _fetch_oembed(video_id) if video_id else None
+
     all_errors = []
-    for opts in _build_ydl_opts_base({"skip_download": True}, video_id=video_id):
+    # Try up to 3 best variants for info (capped to prevent stalls)
+    variants = _build_ydl_opts_base({"skip_download": True}, video_id=video_id)
+    for opts in variants[:3]:
         client = opts.get("extractor_args", {}).get("youtube", {}).get("player_client", ["default"])[0]
         logger = opts.get("logger")
         try:
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(url, download=False)
+            def _extract():
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    return ydl.extract_info(url, download=False)
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                fut = ex.submit(_extract)
+                info = fut.result(timeout=7)
+
             return {
-                "title": info.get("title", "Untitled Video"),
+                "title": info.get("title") or (oembed_info.get("title") if oembed_info else "Untitled Video"),
                 "duration": info.get("duration", 0),
-                "uploader": info.get("uploader", ""),
-                "thumbnail": info.get("thumbnail", ""),
+                "uploader": info.get("uploader") or (oembed_info.get("uploader") if oembed_info else ""),
+                "thumbnail": info.get("thumbnail") or (oembed_info.get("thumbnail") if oembed_info else ""),
             }
         except Exception as e:
             err_msg = str(e).strip()
@@ -317,19 +357,25 @@ def _get_video_info(url: str) -> dict:
             log.warning("  yt-dlp info attempt failed (client=%s): %s", client, err_msg)
             continue
 
-    raise RuntimeError(f"All yt-dlp attempts failed. Errors: {'; '.join(all_errors)}")
+    # If yt-dlp timed out or failed but oEmbed succeeded, use oEmbed metadata immediately
+    if oembed_info:
+        log.info("Using instant oEmbed metadata fallback for %s: %s", video_id, oembed_info.get("title"))
+        return oembed_info
+
+    raise RuntimeError(f"Could not fetch video info from YouTube: {'; '.join(all_errors)}")
 
 
 def _download_video(url: str, output_path: str, progress_hook: Optional[Callable] = None) -> str:
-    """Download video to output_path using yt-dlp."""
+    """Download video to output_path using yt-dlp with fail-fast timeouts."""
     import yt_dlp
+    import concurrent.futures
 
     video_id = _extract_video_id(url)
     hooks = [progress_hook] if progress_hook else []
     format_str = "bestvideo[height<=720]/best[height<=720]/bestvideo/best"
 
     last_err = None
-    for opts in _build_ydl_opts_base({
+    variants = _build_ydl_opts_base({
         "format": format_str,
         "outtmpl": output_path,
         "progress_hooks": hooks,
@@ -338,11 +384,19 @@ def _download_video(url: str, output_path: str, progress_hook: Optional[Callable
             "key": "FFmpegVideoConvertor",
             "preferedformat": "mp4",
         }] if shutil.which("ffmpeg") else [],
-    }, video_id=video_id):
+    }, video_id=video_id)
+
+    for opts in variants:
+        client = opts.get("extractor_args", {}).get("youtube", {}).get("player_client", ["default"])[0]
         try:
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                ydl.download([url])
-            # yt-dlp may append extension; find the actual output file
+            def _do_dl():
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    ydl.download([url])
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                fut = ex.submit(_do_dl)
+                fut.result(timeout=90)  # Max 90 seconds for download
+
             candidates = list(Path(output_path).parent.glob(Path(output_path).stem + "*"))
             mp4s = [c for c in candidates if str(c).endswith(".mp4")]
             result = str(sorted(mp4s or candidates)[0]) if (mp4s or candidates) else output_path
@@ -354,10 +408,15 @@ def _download_video(url: str, output_path: str, progress_hook: Optional[Callable
             if not err_msg and logger and logger.errors:
                 err_msg = logger.errors[-1].strip()
             last_err = err_msg or e
-            client = opts.get("extractor_args", {}).get("youtube", {}).get("player_client", ["default"])[0]
             log.warning("  yt-dlp download attempt failed (client=%s): %s", client, err_msg)
             continue
 
+    is_bot_block = "bot" in str(last_err).lower() or "sign in" in str(last_err).lower() or "verify" in str(last_err).lower()
+    if is_bot_block:
+        raise RuntimeError(
+            "YouTube blocked datacenter server access for this video. "
+            "Please use the YT2PDF Slide Companion browser extension for 100% guaranteed 1-click conversion directly in your browser."
+        )
     raise RuntimeError(f"All yt-dlp download attempts failed. Last error: {last_err}")
 
 

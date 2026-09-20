@@ -2947,7 +2947,7 @@
       updateProgress({
         stage: "fetch",
         progress: 15,
-        message: "⚡ Companion Extension is extracting presentation slides in a silent background tab..."
+        message: "⚡ Companion Extension is capturing presentation slides directly in your browser..."
       });
 
       try {
@@ -2955,7 +2955,7 @@
           const timeout = setTimeout(() => {
             window.removeEventListener("YT2PDF_EXTRACTION_RESULT", handler);
             reject(new Error("Companion extraction timed out. Falling back to server conversion."));
-          }, 45000);
+          }, 35000);
 
           function handler(evt) {
             window.removeEventListener("YT2PDF_EXTRACTION_RESULT", handler);
@@ -2963,7 +2963,7 @@
             if (evt.detail && evt.detail.success) {
               resolve(evt.detail);
             } else {
-              reject(new Error(evt?.detail?.error || "Silent companion extraction failed."));
+              reject(new Error(evt?.detail?.error || "Companion slide extraction failed."));
             }
           }
           window.addEventListener("YT2PDF_EXTRACTION_RESULT", handler);
@@ -2974,7 +2974,7 @@
         });
 
         const result = await extractionPromise;
-        console.log("[Website] Silent extraction succeeded via Companion:", result);
+        console.log("[Website] Extraction succeeded via Companion:", result);
         jobId = result.job_id;
         if (result.backend_base) {
           activeBackendPrefix = result.backend_base;
@@ -2989,6 +2989,7 @@
           message: `Captured ${result.slide_count || 'presentation'} slides! Finalizing PDF compilation...`
         });
 
+        pollErrorCount = 0;
         pollTimer = setInterval(pollStatus, 1500);
         return;
       } catch (companionErr) {
@@ -3022,17 +3023,27 @@
       const banner = document.getElementById("recent-job-banner");
       if (banner) banner.style.display = "none";
       showProgress();
+      pollErrorCount = 0;
       pollTimer = setInterval(pollStatus, 2000);
     } catch(err) {
       showError("Could not reach the server: " + err.message);
     }
   }
 
+  let pollErrorCount = 0;
   async function pollStatus() {
     if (!jobId) return;
     try {
       const res = await apiFetch(`/api/status/${jobId}`);
-      if (!res.ok) return;
+      if (!res.ok) {
+        pollErrorCount++;
+        if (pollErrorCount >= 5) {
+          clearInterval(pollTimer);
+          showError("Job session expired or server restarted. Please try clicking Convert again.");
+        }
+        return;
+      }
+      pollErrorCount = 0;
       const contentType = res.headers.get("content-type") || "";
       if (!contentType.includes("application/json")) return;
       const data = await res.json();
@@ -3045,7 +3056,14 @@
         clearInterval(pollTimer);
         showError(data.error || "Processing failed. Please try again.");
       }
-    } catch(err) { console.warn("Poll error:", err); }
+    } catch(err) {
+      pollErrorCount++;
+      console.warn("Poll error:", err);
+      if (pollErrorCount >= 6) {
+        clearInterval(pollTimer);
+        showError("Lost connection to conversion server. Please check your connection and try again.");
+      }
+    }
   }
 
   async function downloadSlides() {

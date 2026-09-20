@@ -36,38 +36,44 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       } catch (e) {}
 
       const target = new URL(rawUrl);
+      target.searchParams.set("autoplay", "1");
+      target.searchParams.set("mute", "1");
       target.searchParams.set("yt2pdf_headless", "1");
 
-      console.log("[YT2PDF Background] Launching silent background tab for:", target.toString());
+      const originTabId = sender.tab?.id;
+      console.log("[YT2PDF Background] Launching high-speed extraction tab for:", target.toString(), "Origin tab:", originTabId);
 
       chrome.tabs.create({
         url: target.toString(),
-        active: false,
+        active: true,
         muted: true
       }, (tab) => {
         if (chrome.runtime.lastError || !tab) {
           sendResponse({
             success: false,
-            error: chrome.runtime.lastError?.message || "Failed to create background extraction tab."
+            error: chrome.runtime.lastError?.message || "Failed to create extraction tab."
           });
           return;
         }
 
         const tabId = tab.id;
         const timeout = setTimeout(() => {
-          console.warn(`[YT2PDF Background] Tab ${tabId} timed out during silent extraction.`);
+          console.warn(`[YT2PDF Background] Tab ${tabId} timed out during slide extraction.`);
           chrome.tabs.remove(tabId).catch(() => {});
+          if (originTabId) {
+            chrome.tabs.update(originTabId, { active: true }).catch(() => {});
+          }
           if (activeExtractions.has(tabId)) {
             const pending = activeExtractions.get(tabId);
             activeExtractions.delete(tabId);
             pending.sendResponse({
               success: false,
-              error: "Silent extraction timed out (video took longer than 40s to load or was unavailable)."
+              error: "Slide extraction timed out. Falling back to server pipeline."
             });
           }
-        }, 40000);
+        }, 35000);
 
-        activeExtractions.set(tabId, { sendResponse, timeout });
+        activeExtractions.set(tabId, { sendResponse, timeout, originTabId });
       });
     } catch (e) {
       sendResponse({ success: false, error: "Invalid video URL: " + e.message });
@@ -83,6 +89,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const pending = activeExtractions.get(tabId);
       clearTimeout(pending.timeout);
       chrome.tabs.remove(tabId).catch(() => {});
+      if (pending.originTabId) {
+        chrome.tabs.update(pending.originTabId, { active: true }).catch(() => {});
+      }
       activeExtractions.delete(tabId);
       pending.sendResponse({ success: false, error: message.error || "Background extraction failed." });
     }
@@ -117,6 +126,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               const pending = activeExtractions.get(tabId);
               clearTimeout(pending.timeout);
               chrome.tabs.remove(tabId).catch(() => {});
+              if (pending.originTabId) {
+                chrome.tabs.update(pending.originTabId, { active: true }).catch(() => {});
+              }
               activeExtractions.delete(tabId);
               pending.sendResponse({
                 success: true,
@@ -154,10 +166,13 @@ chrome.tabs.onRemoved.addListener((closedTabId) => {
   if (activeExtractions.has(closedTabId)) {
     const pending = activeExtractions.get(closedTabId);
     clearTimeout(pending.timeout);
+    if (pending.originTabId) {
+      chrome.tabs.update(pending.originTabId, { active: true }).catch(() => {});
+    }
     activeExtractions.delete(closedTabId);
     pending.sendResponse({
       success: false,
-      error: "Silent background extraction tab was closed unexpectedly."
+      error: "Extraction tab was closed before completing."
     });
   }
 });
