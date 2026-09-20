@@ -45,8 +45,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       chrome.tabs.create({
         url: target.toString(),
-        active: false,
-        muted: true
+        active: false
       }, (tab) => {
         if (chrome.runtime.lastError || !tab) {
           sendResponse({
@@ -57,6 +56,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
 
         const tabId = tab.id;
+        try {
+          chrome.tabs.update(tabId, { muted: true }).catch(() => {});
+        } catch (e) {}
         const timeout = setTimeout(() => {
           console.warn(`[YT2PDF Background] Tab ${tabId} timed out during slide extraction.`);
           chrome.tabs.remove(tabId).catch(() => {});
