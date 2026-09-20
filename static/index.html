@@ -1142,55 +1142,111 @@
       50% { opacity: 0.55; transform: scale(0.85); }
     }
 
-    .companion-promo-banner {
-      margin: 16px 0 0 0;
-      padding: 14px 18px;
-      background: linear-gradient(135deg, rgba(255, 0, 0, 0.04) 0%, rgba(255, 77, 77, 0.08) 100%);
-      border: 1px solid rgba(255, 0, 0, 0.16);
-      border-radius: 12px;
+    /* ── Clean Companion Feature Box & FAQs ── */
+    .companion-feature-box {
+      margin-top: 16px;
+      background: var(--canvas-soft);
+      border: 1px solid var(--hairline-soft);
+      border-radius: var(--rounded-sm);
+      padding: 16px;
+      transition: border-color var(--tr);
+    }
+    .companion-feature-box:hover {
+      border-color: var(--hairline);
+    }
+    .companion-install-strip {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 16px;
-      cursor: pointer;
-      transition: all 0.2s ease;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--hairline-soft);
     }
-    .companion-promo-banner:hover {
-      border-color: rgba(255, 0, 0, 0.3);
-      background: linear-gradient(135deg, rgba(255, 0, 0, 0.07) 0%, rgba(255, 77, 77, 0.12) 100%);
-      transform: translateY(-1px);
-    }
-    .companion-promo-left {
+    .companion-install-left {
       display: flex;
       align-items: center;
       gap: 12px;
+      flex: 1;
     }
-    .companion-pill-badge {
+    .companion-step-badge {
       font-size: 11px;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.5px;
-      padding: 3px 8px;
+      padding: 4px 9px;
       border-radius: 6px;
-      background: #FF0000;
-      color: #FFFFFF;
+      background: var(--primary);
+      color: var(--on-primary);
       flex-shrink: 0;
+      transition: all var(--tr);
     }
-    .companion-promo-text {
+    .companion-step-badge.is-active {
+      background: #10b981;
+      color: #ffffff;
+    }
+    .companion-install-text {
       font-size: 13px;
       color: var(--ink);
-      line-height: 1.4;
+      line-height: 1.45;
     }
-    .companion-promo-right {
-      flex-shrink: 0;
-    }
-    .companion-promo-link {
+    .companion-install-btn {
       font-size: 12.5px;
-      font-weight: 600;
-      color: #FF0000;
+      padding: 8px 16px;
+      border-radius: var(--rounded-full);
+      flex-shrink: 0;
+      white-space: nowrap;
       display: inline-flex;
       align-items: center;
-      gap: 4px;
+      gap: 7px;
+    }
+    .companion-faq-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .companion-faq-item {
+      background: var(--canvas);
+      border: 1px solid var(--hairline-soft);
+      border-radius: 10px;
+      overflow: hidden;
+      transition: background-color var(--tr), border-color var(--tr);
+    }
+    .companion-faq-item[open] {
+      border-color: var(--hairline);
+      background-color: var(--canvas);
+    }
+    .companion-faq-q {
+      padding: 11px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink);
+      cursor: pointer;
+      list-style: none;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      user-select: none;
+    }
+    .companion-faq-q::-webkit-details-marker {
+      display: none;
+    }
+    .companion-faq-chevron {
+      width: 15px;
+      height: 15px;
+      color: var(--text-muted);
+      transition: transform var(--tr);
+      flex-shrink: 0;
+    }
+    .companion-faq-item[open] .companion-faq-chevron {
+      transform: rotate(180deg);
+      color: var(--ink);
+    }
+    .companion-faq-a {
+      padding: 0 14px 12px;
+      font-size: 12.5px;
+      color: var(--text-muted);
+      line-height: 1.5;
     }
 
     .companion-modal-body {
@@ -1277,7 +1333,9 @@
 
     @media (max-width: 640px) {
       .btn-companion-nav span { display: none; }
-      .companion-promo-banner { flex-direction: column; align-items: flex-start; }
+      .companion-install-strip { flex-direction: column; align-items: stretch; gap: 12px; }
+      .companion-install-left { align-items: flex-start; }
+      .companion-install-btn { width: 100%; justify-content: center; }
       .companion-modal-body { padding: 16px; }
       .companion-modal-actions { flex-direction: column; align-items: stretch; }
     }
@@ -2048,16 +2106,57 @@
         <div class="enter-hint" style="margin-left:auto;">Press Enter ↵ to convert</div>
       </div>
 
-      <!-- Companion Extension Promo Banner -->
-      <div class="companion-promo-banner" onclick="openCompanionModal()" role="button" tabindex="0" aria-label="Learn how to bypass YouTube bot restrictions with the Chrome Companion Extension">
-        <div class="companion-promo-left">
-          <span class="companion-pill-badge">Bypass Bot Blocks</span>
-          <span class="companion-promo-text">
-            <strong>Tired of YouTube video restrictions?</strong> Extract presentation slides 100% reliably with our free, open-source <strong>Chrome Companion Extension</strong>.
-          </span>
+      <!-- Companion Extension Section (Replaces Red Banner) -->
+      <div class="companion-feature-box">
+        <!-- Top Install Callout -->
+        <div class="companion-install-strip">
+          <div class="companion-install-left">
+            <span class="companion-step-badge">Install First</span>
+            <div class="companion-install-text">
+              <strong>Firstly, install this extension in your browser</strong> to bypass server download bot inspection.
+            </div>
+          </div>
+          <button type="button" class="btn-primary companion-install-btn" onclick="openCompanionModal()" aria-label="Install Chrome Companion Extension">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            <span>Chrome Extension ↗</span>
+          </button>
         </div>
-        <div class="companion-promo-right">
-          <span class="companion-promo-link">How it works &amp; Install ↗</span>
+
+        <!-- Questions & Answers -->
+        <div class="companion-faq-list">
+          <details class="companion-faq-item">
+            <summary class="companion-faq-q">
+              <span>Is this extension safe?</span>
+              <svg class="companion-faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="companion-faq-a">
+              Yes, 100% safe. The extension is completely open-source, requires no account login, collects no personal data or cookies, and contains zero ads or tracking. It only captures slide frames from your active YouTube tab when you choose to extract slides.
+            </div>
+          </details>
+
+          <details class="companion-faq-item">
+            <summary class="companion-faq-q">
+              <span>Why do we need this extension?</span>
+              <svg class="companion-faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="companion-faq-a">
+              YouTube regularly restricts cloud datacenter servers from streaming high-resolution video. By capturing video frames right inside your browser, YouTube sees a normal human viewer session, guaranteeing 100% successful slide capture without bot blocks or download queue timeouts.
+            </div>
+          </details>
+
+          <details class="companion-faq-item">
+            <summary class="companion-faq-q">
+              <span>Why can't I just use the website without the extension?</span>
+              <svg class="companion-faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </summary>
+            <div class="companion-faq-a">
+              You can still use the website directly without installing anything! However, if YouTube's anti-bot system blocks our cloud servers from processing a specific video, conversion may fail. The companion extension guarantees that any lecture video can be extracted without server-side blocks.
+            </div>
+          </details>
         </div>
       </div>
 
@@ -2527,20 +2626,21 @@
         navBtn.title = "Chrome Companion is connected (Silent background extraction enabled)";
       }
 
-      const bannerText = document.querySelector(".companion-promo-text");
-      const pillBadge = document.querySelector(".companion-pill-badge");
-      const promoLink = document.querySelector(".companion-promo-link");
-      if (pillBadge) {
-        pillBadge.textContent = "⚡ Extension Active";
-        pillBadge.style.background = "#10b981";
-        pillBadge.style.color = "#FFFFFF";
+      const stepBadge = document.querySelector(".companion-step-badge");
+      const installText = document.querySelector(".companion-install-text");
+      const installBtn = document.querySelector(".companion-install-btn");
+      if (stepBadge) {
+        stepBadge.textContent = "⚡ Active";
+        stepBadge.classList.add("is-active");
       }
-      if (bannerText) {
-        bannerText.innerHTML = "<strong>Silent extraction active!</strong> Paste any YouTube link above and presentation slides will be extracted automatically without leaving this page.";
+      if (installText) {
+        installText.innerHTML = "<strong>Companion Extension active!</strong> Instant silent background slide extraction is ready.";
       }
-      if (promoLink) {
-        promoLink.textContent = "How it works ✓";
-        promoLink.style.color = "#10b981";
+      if (installBtn) {
+        installBtn.innerHTML = `
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          <span>Extension Ready ✓</span>
+        `;
       }
     }
 
