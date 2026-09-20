@@ -30,6 +30,19 @@ export default {
       backendBase = DEFAULT_BACKEND;
     }
 
+    // Handle CORS preflight requests
+    if (request.method === "OPTIONS") {
+      return new Response(null, {
+        status: 204,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, HEAD",
+          "Access-Control-Allow-Headers": "*",
+          "Access-Control-Max-Age": "86400",
+        }
+      });
+    }
+
     // 1. Proxy API requests to Python FastAPI backend
     if (url.pathname.startsWith("/api/")) {
       try {
@@ -60,11 +73,22 @@ export default {
             status: backendResponse.status
           }), {
             status: backendResponse.status >= 400 ? backendResponse.status : 502,
-            headers: { "Content-Type": "application/json; charset=utf-8" }
+            headers: {
+              "Content-Type": "application/json; charset=utf-8",
+              "Access-Control-Allow-Origin": "*"
+            }
           });
         }
 
-        return backendResponse;
+        // Forward response with CORS header
+        const resHeaders = new Headers(backendResponse.headers);
+        resHeaders.set("Access-Control-Allow-Origin", "*");
+        return new Response(backendResponse.body, {
+          status: backendResponse.status,
+          statusText: backendResponse.statusText,
+          headers: resHeaders
+        });
+
       } catch (err) {
         return new Response(JSON.stringify({
           error: "Backend service unreachable",
@@ -72,7 +96,10 @@ export default {
           suggestion: "Ensure your Python backend is running."
         }), {
           status: 502,
-          headers: { "Content-Type": "application/json" }
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*"
+          }
         });
       }
     }

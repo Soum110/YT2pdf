@@ -18,6 +18,7 @@ from pathlib import Path
 
 import aiofiles
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, HttpUrl
@@ -39,6 +40,14 @@ CONTACT_RECIPIENT_EMAIL = os.environ.get("CONTACT_EMAIL", "sensoumen176@gmail.co
 executor = ThreadPoolExecutor(max_workers=3)
 
 app = FastAPI(title="YT2PDFS", version="1.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 def _ensure_pot_server():

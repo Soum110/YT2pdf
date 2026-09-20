@@ -1,29 +1,11 @@
 /**
- * content.js — YT2PDF Browser Companion
- * Injects a native-styled "Generate PDF via YT2PDFS" button into YouTube
- * and captures clean slide frames directly from playback with zero server bot blocks.
+ * content.js — YT2PDF Slide Companion
+ * Injects a native-styled "PDF Slides" button directly into YouTube's action bar
+ * and captures clean presentation slides in the background.
  */
 
 (function () {
-  const BACKEND_URLS = [
-    "https://yt2pdfs.com",
-    "https://yt2pdf-214301889618.europe-west1.run.app"
-  ];
-
   let isExtracting = false;
-
-  // ─────────────────────────────────────────────
-  // Helper: Get best available backend
-  // ─────────────────────────────────────────────
-  async function getWorkingBackend() {
-    for (const base of BACKEND_URLS) {
-      try {
-        const res = await fetch(`${base}/api/health`, { method: "GET", signal: AbortSignal.timeout(3000) });
-        if (res.ok) return base;
-      } catch (e) {}
-    }
-    return BACKEND_URLS[0];
-  }
 
   // ─────────────────────────────────────────────
   // Toast notification
@@ -36,27 +18,28 @@
     toast.id = "yt2pdf-toast";
     toast.style.cssText = `
       position: fixed;
-      bottom: 32px;
-      right: 32px;
-      z-index: 999999;
-      background: ${isError ? "#C5221F" : "#0F0F0F"};
+      bottom: 28px;
+      right: 28px;
+      z-index: 9999999;
+      background: ${isError ? "#BA1A1A" : "#1A1A1A"};
       color: #FFFFFF;
-      border: 1px solid ${isError ? "#EA4335" : "#303030"};
+      border: 1px solid ${isError ? "#FF5449" : "rgba(255, 255, 255, 0.18)"};
       border-radius: 12px;
-      padding: 14px 20px;
+      padding: 13px 18px;
       font-family: Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 14px;
+      font-size: 13.5px;
       font-weight: 500;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+      box-shadow: 0 12px 32px rgba(0,0,0,0.5);
       display: flex;
       align-items: center;
-      gap: 12px;
-      animation: yt2pdf-fade-in 0.25s ease;
-      max-width: 420px;
+      gap: 10px;
+      animation: yt2pdf-fade-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      max-width: 440px;
+      line-height: 1.4;
     `;
 
     toast.innerHTML = `
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FF4D4D" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="${isError ? '#FFDAD6' : '#FF4D4D'}" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;">
         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
         <polyline points="14 2 14 8 20 8"></polyline>
         <line x1="16" y1="13" x2="8" y2="13"></line>
@@ -70,19 +53,18 @@
 
     setTimeout(() => {
       if (toast && toast.parentNode) {
-        toast.style.transition = "opacity 0.4s ease, transform 0.4s ease";
+        toast.style.transition = "opacity 0.35s ease, transform 0.35s ease";
         toast.style.opacity = "0";
-        toast.style.transform = "translateY(10px)";
-        setTimeout(() => toast.remove(), 400);
+        toast.style.transform = "translateY(12px)";
+        setTimeout(() => toast.remove(), 380);
       }
-    }, 5000);
+    }, 5500);
   }
 
   // ─────────────────────────────────────────────
-  // Perceptual frame difference
+  // Perceptual frame difference (luminance diff)
   // ─────────────────────────────────────────────
   function calculateDifference(canvasA, canvasB) {
-    // Compares two 32x18 downscaled canvases
     const ctxA = canvasA.getContext("2d");
     const ctxB = canvasB.getContext("2d");
     const dataA = ctxA.getImageData(0, 0, 32, 18).data;
@@ -91,7 +73,6 @@
     let diff = 0;
     const total = 32 * 18 * 4;
     for (let i = 0; i < total; i += 4) {
-      // Grayscale luminance difference
       const lumA = 0.299 * dataA[i] + 0.587 * dataA[i + 1] + 0.114 * dataA[i + 2];
       const lumB = 0.299 * dataB[i] + 0.587 * dataB[i + 1] + 0.114 * dataB[i + 2];
       diff += Math.abs(lumA - lumB);
@@ -100,50 +81,53 @@
   }
 
   // ─────────────────────────────────────────────
-  // Core: Background Slide Extraction
+  // Background Slide Extraction
   // ─────────────────────────────────────────────
   async function startSlideExtraction(buttonEl) {
     if (isExtracting) return;
     const video = document.querySelector("video.html5-main-video");
     if (!video || !video.duration || isNaN(video.duration)) {
-      showToast("Please wait for the video to load before extracting slides.", true);
+      showToast("Please wait for video to load before extracting slides.", true);
       return;
     }
 
     isExtracting = true;
-    const originalText = buttonEl.innerHTML;
+    const originalContent = buttonEl.innerHTML;
     const originalTime = video.currentTime;
     const wasPaused = video.paused;
 
-    // Temporarily mute and pause so seeking doesn't blast audio
+    // Mute and pause temporarily for quiet, background seeking
     const originalMuted = video.muted;
     video.muted = true;
     if (!wasPaused) video.pause();
 
     try {
       const duration = Math.floor(video.duration);
-      const titleEl = document.querySelector("h1.ytd-watch-metadata yt-formatted-string") || document.querySelector("h1.title");
+      const titleEl = document.querySelector("h1.ytd-watch-metadata yt-formatted-string") ||
+                      document.querySelector("h1.title yt-formatted-string") ||
+                      document.querySelector("h1.title");
       const videoTitle = titleEl ? titleEl.innerText.trim() : document.title.replace(" - YouTube", "").trim();
       const videoUrl = window.location.href;
 
-      // Determine smart step intervals
+      // Smart sample intervals based on video duration
       let step = 10;
-      if (duration > 3600) step = 45;       // > 1 hour: sample every 45s
-      else if (duration > 1800) step = 30;  // 30-60 mins: every 30s
-      else if (duration > 600) step = 15;   // 10-30 mins: every 15s
-      else step = 8;                        // < 10 mins: every 8s
+      if (duration > 3600) step = 45;       // > 1 hr
+      else if (duration > 1800) step = 30;  // 30-60 mins
+      else if (duration > 600) step = 15;   // 10-30 mins
+      else step = 8;                        // < 10 mins
 
       const samplePoints = [];
       for (let t = 2; t < duration - 2; t += step) {
         samplePoints.push(t);
       }
 
-      // Max 60 sample frames to keep payload lightweight and fast
-      const finalPoints = samplePoints.length > 60
-        ? samplePoints.filter((_, idx) => idx % Math.ceil(samplePoints.length / 60) === 0)
+      // Max 32 frames to keep transmission fast (< 1.5MB)
+      const maxFrames = 32;
+      const finalPoints = samplePoints.length > maxFrames
+        ? samplePoints.filter((_, idx) => idx % Math.ceil(samplePoints.length / maxFrames) === 0)
         : samplePoints;
 
-      // Setup capture canvases
+      // Canvases
       const captureCanvas = document.createElement("canvas");
       captureCanvas.width = 1280;
       captureCanvas.height = 720;
@@ -175,18 +159,17 @@
           };
           video.addEventListener("seeked", onSeeked, { once: true });
           video.currentTime = timeTarget;
-          // Fallback timeout in case seeked event drops
-          setTimeout(resolve, 350);
+          setTimeout(resolve, 400); // Fallback timeout
         });
 
-        // Update button progress
+        // Update button status
         const pct = Math.round(((i + 1) / finalPoints.length) * 100);
         buttonEl.innerHTML = `
-          <svg class="yt2pdf-spinner" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
-          <span>Scanning ${pct}% (${capturedSlides.length} slides)</span>
+          <svg class="yt2pdf-spinner" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
+          <span>${pct}% (${capturedSlides.length})</span>
         `;
 
-        // Render to thumbnail for fast diff
+        // Diff thumbnails
         const activeThumbCanvas = (capturedSlides.length % 2 === 0) ? thumbCanvasA : thumbCanvasB;
         const prevThumbCanvas = (capturedSlides.length % 2 === 0) ? thumbCanvasB : thumbCanvasA;
         const activeThumbCtx = activeThumbCanvas.getContext("2d");
@@ -195,16 +178,15 @@
         let isDistinct = true;
         if (hasPreviousThumb) {
           const diff = calculateDifference(activeThumbCanvas, prevThumbCanvas);
-          if (diff < 0.08) {
-            isDistinct = false; // Duplicate / minor motion; skip
+          if (diff < 0.07) {
+            isDistinct = false;
           }
         }
 
         if (isDistinct) {
           hasPreviousThumb = true;
-          // Render full resolution frame
           captureCtx.drawImage(video, 0, 0, 1280, 720);
-          const base64Data = captureCanvas.toDataURL("image/jpeg", 0.85);
+          const base64Data = captureCanvas.toDataURL("image/jpeg", 0.78);
 
           capturedSlides.push({
             timestamp: timeTarget,
@@ -215,23 +197,20 @@
       }
 
       if (capturedSlides.length === 0) {
-        // Fallback: grab current frame
         captureCtx.drawImage(video, 0, 0, 1280, 720);
         capturedSlides.push({
           timestamp: originalTime,
           time_formatted: "0:00",
-          data: captureCanvas.toDataURL("image/jpeg", 0.85)
+          data: captureCanvas.toDataURL("image/jpeg", 0.78)
         });
       }
 
-      // Update button state for transmission
+      // Update button state: uploading
       buttonEl.innerHTML = `
-        <svg class="yt2pdf-spinner" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
-        <span>Sending to YT2PDFS...</span>
+        <svg class="yt2pdf-spinner" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
+        <span>Uploading...</span>
       `;
 
-      // Upload frames to YT2PDFS backend
-      const backendBase = await getWorkingBackend();
       const payload = {
         video_url: videoUrl,
         title: videoTitle,
@@ -239,112 +218,165 @@
         frames: capturedSlides
       };
 
-      const response = await fetch(`${backendBase}/api/companion/upload-frames`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
+      // Upload frames: First try background service worker (bypasses page CORS completely)
+      let uploadResult = null;
+      let uploadError = null;
 
-      if (!response.ok) {
-        throw new Error(`Server returned HTTP ${response.status}`);
+      try {
+        uploadResult = await new Promise((resolve, reject) => {
+          if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
+            chrome.runtime.sendMessage({
+              action: "upload_frames",
+              payload: payload
+            }, (res) => {
+              if (chrome.runtime.lastError) {
+                reject(new Error(chrome.runtime.lastError.message));
+              } else if (res && res.success) {
+                resolve(res.data);
+              } else {
+                reject(new Error(res?.error || "Upload rejected"));
+              }
+            });
+          } else {
+            reject(new Error("Extension messaging not available"));
+          }
+        });
+      } catch (bgErr) {
+        console.warn("[YT2PDF Companion] Background worker failed, using direct fetch fallback:", bgErr);
+        // Direct fetch fallback
+        const backends = [
+          "https://yt2pdf-214301889618.europe-west1.run.app",
+          "https://yt2pdfs.com"
+        ];
+        for (const base of backends) {
+          try {
+            const resp = await fetch(`${base}/api/companion/upload-frames`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload)
+            });
+            if (resp.ok) {
+              uploadResult = await resp.json();
+              break;
+            } else {
+              uploadError = `HTTP ${resp.status}`;
+            }
+          } catch (e) {
+            uploadError = e.message;
+          }
+        }
+        if (!uploadResult) {
+          throw new Error(uploadError || bgErr.message);
+        }
       }
 
-      const result = await response.json();
-      const jobId = result.job_id;
+      const jobId = uploadResult.job_id;
       const destinationUrl = `https://yt2pdfs.com/?job_id=${jobId}`;
 
       buttonEl.innerHTML = `
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2BA640" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-        <span>Ready! Opening...</span>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2BA640" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+        <span>Opening...</span>
       `;
 
       showToast(`🎉 ${capturedSlides.length} slides captured! Opening YT2PDFS to download your PDF...`);
 
-      // Open YT2PDFS in a new tab so user reviews and downloads their PDF
+      // Open YT2PDFS in a new tab for curation & download
       window.open(destinationUrl, "_blank");
 
       setTimeout(() => {
-        buttonEl.innerHTML = originalText;
+        buttonEl.innerHTML = originalContent;
         buttonEl.style.opacity = "1";
         isExtracting = false;
-      }, 3000);
+      }, 3500);
 
     } catch (err) {
       console.error("[YT2PDF Companion Error]:", err);
       showToast(`Extraction failed: ${err.message}`, true);
-      buttonEl.innerHTML = originalText;
+      buttonEl.innerHTML = originalContent;
       buttonEl.style.opacity = "1";
       isExtracting = false;
     } finally {
-      // Restore playback state
       video.currentTime = originalTime;
       video.muted = originalMuted;
-      if (!wasPaused) {
-        video.play().catch(() => {});
-      }
+      if (!wasPaused) video.play().catch(() => {});
     }
   }
 
   // ─────────────────────────────────────────────
-  // Inject "Generate PDF" Button into YouTube UI
+  // Native-Styled Button Injection
   // ─────────────────────────────────────────────
   function injectButton() {
     if (document.getElementById("yt2pdf-action-btn")) return;
 
-    // Target YouTube's action bar containers
-    const actionsBar = 
-      document.querySelector("#actions.ytd-watch-metadata #top-row") ||
-      document.querySelector("ytd-watch-metadata #actions-inner") ||
+    // Target the actual button list container inside YouTube actions
+    const topButtons = 
       document.querySelector("#top-level-buttons-computed") ||
-      document.querySelector("#actions.ytd-watch-metadata") ||
-      document.querySelector(".yt-flexible-actions-view-model");
+      document.querySelector(".yt-flexible-actions-view-model") ||
+      document.querySelector("ytd-menu-renderer #top-level-buttons-computed");
 
-    if (!actionsBar) return;
+    const subscribeBtn = 
+      document.querySelector("#owner #subscribe-button") ||
+      document.querySelector("#subscribe-button ytd-subscribe-button-renderer");
 
-    // Create native-styled YouTube pill button
+    if (!topButtons && !subscribeBtn) return;
+
+    // Create native YouTube action button
     const btn = document.createElement("button");
     btn.id = "yt2pdf-action-btn";
-    btn.className = "yt-spec-button-shape-next yt-spec-button-shape-next--tonal yt-spec-button-shape-next--mono yt-spec-button-shape-next--size-m";
+    btn.className = "yt-spec-button-shape-next yt-spec-button-shape-next--tonal yt-spec-button-shape-next--mono yt-spec-button-shape-next--size-m yt-spec-button-shape-next--icon-leading";
+    btn.setAttribute("aria-label", "Convert slides to PDF on YT2PDFS.com");
+    btn.title = "Extract presentation slides & generate PDF notes on YT2PDFS.com";
+
     btn.style.cssText = `
       display: inline-flex;
       align-items: center;
-      gap: 7px;
-      margin-left: 8px;
-      padding: 0 16px;
+      gap: 6px;
+      margin: 0 4px;
+      padding: 0 14px;
       height: 36px;
       border-radius: 18px;
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      background: rgba(255, 0, 0, 0.12);
-      color: #FFFFFF;
-      font-family: Roboto, Arial, sans-serif;
+      border: none;
+      background: rgba(255, 255, 255, 0.1);
+      color: #F1F1F1;
+      font-family: "Roboto", Arial, sans-serif;
       font-size: 14px;
       font-weight: 500;
       cursor: pointer;
-      transition: background 0.2s, transform 0.15s;
+      white-space: nowrap;
+      transition: background 0.2s ease, transform 0.1s ease;
       vertical-align: middle;
-      z-index: 10;
+      flex-shrink: 0;
+      box-sizing: border-box;
+      line-height: normal;
+      user-select: none;
     `;
 
     btn.innerHTML = `
-      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#FF4D4D" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#FF4D4D" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;">
         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
         <polyline points="14 2 14 8 20 8"></polyline>
         <line x1="16" y1="13" x2="8" y2="13"></line>
         <line x1="16" y1="17" x2="8" y2="17"></line>
         <polyline points="10 9 9 9 8 9"></polyline>
       </svg>
-      <span style="letter-spacing: 0.1px;">Generate PDF (YT2PDFS)</span>
+      <span style="font-size:14px;font-weight:500;">PDF Slides</span>
     `;
 
-    btn.title = "Capture presentation slides & generate PDF notes on YT2PDFS.com";
-
     btn.addEventListener("mouseenter", () => {
-      btn.style.background = "rgba(255, 0, 0, 0.22)";
-      btn.style.transform = "scale(1.02)";
+      btn.style.background = "rgba(255, 255, 255, 0.2)";
+      btn.style.color = "#FFFFFF";
     });
 
     btn.addEventListener("mouseleave", () => {
-      btn.style.background = "rgba(255, 0, 0, 0.12)";
+      btn.style.background = "rgba(255, 255, 255, 0.1)";
+      btn.style.color = "#F1F1F1";
+    });
+
+    btn.addEventListener("mousedown", () => {
+      btn.style.transform = "scale(0.97)";
+    });
+
+    btn.addEventListener("mouseup", () => {
       btn.style.transform = "scale(1)";
     });
 
@@ -354,11 +386,20 @@
       startSlideExtraction(btn);
     });
 
-    // Insert button near the actions
-    actionsBar.appendChild(btn);
+    // Placement logic:
+    // Insert into topButtons right after Like/Dislike segment, or prepend
+    if (topButtons) {
+      if (topButtons.children.length > 1) {
+        topButtons.insertBefore(btn, topButtons.children[1]);
+      } else {
+        topButtons.prepend(btn);
+      }
+    } else if (subscribeBtn && subscribeBtn.parentNode) {
+      subscribeBtn.parentNode.insertBefore(btn, subscribeBtn.nextSibling);
+    }
   }
 
-  // Inject spinner animation styles
+  // Animation styles
   const style = document.createElement("style");
   style.textContent = `
     @keyframes yt2pdf-spin {
@@ -366,7 +407,7 @@
       to { transform: rotate(360deg); }
     }
     @keyframes yt2pdf-fade-in {
-      from { opacity: 0; transform: translateY(12px); }
+      from { opacity: 0; transform: translateY(10px); }
       to { opacity: 1; transform: translateY(0); }
     }
     .yt2pdf-spinner {
@@ -375,15 +416,13 @@
   `;
   document.head.appendChild(style);
 
-  // ─────────────────────────────────────────────
-  // Navigation & SPA Watcher
-  // ─────────────────────────────────────────────
-  setInterval(injectButton, 1200);
+  // Periodic and SPA navigation watcher
+  setInterval(injectButton, 1000);
   window.addEventListener("yt-navigate-finish", injectButton);
   window.addEventListener("spfdone", injectButton);
   window.addEventListener("popstate", injectButton);
 
-  // Listen for trigger messages from popup
+  // Message listener for popup
   if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage) {
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (request.action === "extract_slides") {
