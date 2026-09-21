@@ -60,6 +60,12 @@ function cleanupExtraction(tabId, errorMsg = null, successData = null) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // 1. Silent Background Extraction requested from YT2PDFS Website
   if (message.action === "start_background_extraction") {
+    // Deduplicate: If an extraction is already running, do not spawn another window
+    if (activeExtractions.size > 0) {
+      console.log("[YT2PDF Background] An extraction is already actively running; skipping duplicate trigger.");
+      return true;
+    }
+
     try {
       let rawUrl = message.video_url;
       try {
@@ -84,31 +90,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       const originTabId = sender.tab?.id;
       const originUrl = message.origin_url || null;
-      console.log("[YT2PDF Background] Launching offscreen extraction window for:", target.toString(), "Origin:", originUrl);
+      console.log("[YT2PDF Background] Launching background extraction window for:", target.toString(), "Origin:", originUrl);
 
-      // Open in a completely isolated off-screen popup window so NO TAB appears in the user's tab section
-      chrome.windows.create({
-        url: target.toString(),
-        type: "popup",
-        focused: false,
-        left: 25000,
-        top: 25000,
-        width: 800,
-        height: 600
-      }, (win) => {
-        if (chrome.runtime.lastError || !win) {
-          console.warn("[YT2PDF Background] chrome.windows.create failed, falling back to tab:", chrome.runtime.lastError?.message);
-          // Fallback to active: false tab only if window creation failed
-          chrome.tabs.create({ url: target.toString(), active: false }, (tab) => {
-            if (chrome.runtime.lastError || !tab) {
-              sendResponse({ success: false, error: chrome.runtime.lastError?.message || "Failed to create extraction process." });
-              return;
-            }
-            registerExtraction(tab.id, null, originTabId, originUrl, sendResponse);
-          });
-          return;
-        }
-
+      const setupWindowTabs = (win) => {
         const windowId = win.id;
         if (win.tabs && win.tabs.length > 0 && win.tabs[0].id) {
           registerExtraction(win.tabs[0].id, windowId, originTabId, originUrl, sendResponse);
@@ -118,6 +102,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             registerExtraction(tabId, windowId, originTabId, originUrl, sendResponse);
           });
         }
+      };
+
+      // Open a separate minimized window so NO TAB appears in the user's active tab strip
+      chrome.windows.create({
+        url: target.toString(),
+        state: "minimized",
+        focused: false
+      }, (win) => {
+        if (chrome.runtime.lastError || !win) {
+          console.warn("[YT2PDF Background] Minimized window creation error, attempting popup fallback:", chrome.runtime.lastError?.message);
+          // Fallback to separate popup window (NEVER call tabs.create to avoid cluttering user tab strip)
+          chrome.windows.create({
+            url: target.toString(),
+            type: "popup",
+            focused: false,
+            width: 400,
+            height: 300
+          }, (popupWin) => {
+            if (chrome.runtime.lastError || !popupWin) {
+              sendResponse({
+                success: false,
+                error: chrome.runtime.lastError?.message || "Failed to initialize extraction window."
+              });
+              return;
+            }
+            setupWindowTabs(popupWin);
+          });
+          return;
+        }
+
+        setupWindowTabs(win);
       });
     } catch (e) {
       sendResponse({ success: false, error: "Invalid video URL: " + e.message });

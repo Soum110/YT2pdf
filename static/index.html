@@ -3115,7 +3115,6 @@
           window.dispatchEvent(new CustomEvent("YT2PDF_START_EXTRACTION", {
             detail: { video_url: url }
           }));
-          window.postMessage({ type: "YT2PDF_START_EXTRACTION", video_url: url }, "*");
         });
 
         const result = await extractionPromise;

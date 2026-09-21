@@ -53,7 +53,16 @@
     if (announceCount > 15) clearInterval(announcer);
   }, 400);
 
+  let isExtracting = false;
+  let lastExtractionTime = 0;
+
   function executeExtraction(videoUrl) {
+    const now = Date.now();
+    if (isExtracting || (now - lastExtractionTime < 4000)) {
+      console.log("[YT2PDF Bridge] Extraction already in progress or debounced; ignoring duplicate trigger.");
+      return;
+    }
+
     if (!videoUrl) {
       dispatchResult({ success: false, error: "No video URL provided." });
       return;
@@ -64,6 +73,8 @@
       return;
     }
 
+    isExtracting = true;
+    lastExtractionTime = now;
     console.log("[YT2PDF Bridge] Forwarding silent extraction request to background worker for:", videoUrl);
 
     try {
@@ -96,6 +107,7 @@
   }
 
   function dispatchResult(detail) {
+    isExtracting = false;
     window.dispatchEvent(new CustomEvent("YT2PDF_EXTRACTION_RESULT", { detail }));
     window.postMessage({ type: "YT2PDF_EXTRACTION_RESULT", detail }, "*");
   }
