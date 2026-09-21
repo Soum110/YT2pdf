@@ -3065,8 +3065,8 @@
             if (hasSettled) return;
             hasSettled = true;
             cleanupListeners();
-            reject(new Error("Slide extraction timed out. Please check that the YouTube video is publicly accessible and try again."));
-          }, 80000);
+            reject(new Error("Slide extraction timed out after 3 minutes. Please check that the YouTube video is publicly accessible and try again."));
+          }, 180000);
 
           function cleanupListeners() {
             window.removeEventListener("YT2PDF_EXTRACTION_RESULT", handler);

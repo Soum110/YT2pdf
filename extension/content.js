@@ -408,19 +408,22 @@
       console.warn("[YT2PDF Companion] Web Worker timer fallback:", e);
     }
 
-    // 2. Activate inaudible AudioContext to prevent Chromium from throttling background video decoding
+    // 2. Enforce 100% complete silence: permanently mute and zero-volume all audio/video elements
+    const silenceMediaElement = (el) => {
+      try {
+        el.muted = true;
+        el.volume = 0;
+        el.defaultMuted = true;
+      } catch (e) {}
+    };
+
     try {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (AudioCtx) {
-        const ac = new AudioCtx();
-        const osc = ac.createOscillator();
-        const gain = ac.createGain();
-        gain.gain.value = 0.0001; // Silent / inaudible
-        osc.connect(gain);
-        gain.connect(ac.destination);
-        osc.start();
-      }
-    } catch(e) {}
+      document.querySelectorAll("video, audio").forEach(silenceMediaElement);
+      const silenceObserver = new MutationObserver(() => {
+        document.querySelectorAll("video, audio").forEach(silenceMediaElement);
+      });
+      silenceObserver.observe(document.documentElement || document.body, { childList: true, subtree: true });
+    } catch (e) {}
 
     function dismissOverlaysAndSkipAds(videoEl) {
       // Fast-forward ads
