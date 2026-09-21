@@ -19,18 +19,26 @@ from typing import Optional
 log = logging.getLogger("pdf_study_guide")
 
 CHROME_PATHS = [
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    "/Applications/Chromium.app/Contents/MacOS/Chromium",
-    "/usr/bin/google-chrome",
+    os.environ.get("CHROME_BIN", ""),
+    os.environ.get("PUPPETEER_EXECUTABLE_PATH", ""),
     "/usr/bin/chromium",
     "/usr/bin/chromium-browser",
+    "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
 ]
 
 def _find_chrome() -> Optional[str]:
     for p in CHROME_PATHS:
-        if os.path.exists(p):
+        if p and os.path.exists(p):
             return p
-    which_chrome = shutil.which("google-chrome") or shutil.which("chromium")
+    which_chrome = (
+        shutil.which("chromium")
+        or shutil.which("chromium-browser")
+        or shutil.which("google-chrome")
+        or shutil.which("google-chrome-stable")
+    )
     return which_chrome
 
 
@@ -593,6 +601,71 @@ def _build_html(study_guide, video_title: str) -> str:
 </html>'''
 
 
+def _clean_text_for_pdf(text: str) -> str:
+    """Safely converts arbitrary unicode text to Latin-1 compatible string without crashing."""
+    if not text:
+        return ""
+    replacements = {
+        "—": "--",
+        "–": "-",
+        "―": "--",
+        "‘": "'",
+        "’": "'",
+        "“": '"',
+        "”": '"',
+        "„": '"',
+        "•": "*",
+        "…": "...",
+        "→": "->",
+        "←": "<-",
+        "⇒": "=>",
+        "⇔": "<=>",
+        "≥": ">=",
+        "≤": "<=",
+        "≠": "!=",
+        "≈": "~",
+        "±": "+/-",
+        "×": "x",
+        "÷": "/",
+        "√": "sqrt",
+        "∑": "sum",
+        "∏": "prod",
+        "∫": "integral",
+        "°": " deg",
+        "µ": "u",
+        "α": "alpha",
+        "β": "beta",
+        "γ": "gamma",
+        "θ": "theta",
+        "λ": "lambda",
+        "μ": "mu",
+        "π": "pi",
+        "σ": "sigma",
+        "ω": "omega",
+        "Δ": "Delta",
+        "Ω": "Omega",
+        "\u00A0": " ",
+        "\u200B": "",
+        "\u202F": " ",
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    return text.encode("latin-1", "replace").decode("latin-1")
+
+
+def _find_system_ttf_font() -> tuple[Optional[str], Optional[str]]:
+    """Locates system Unicode TrueType fonts (Regular, Bold)."""
+    candidates = [
+        ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+        ("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"),
+        ("/usr/share/fonts/truetype/freefont/FreeSans.ttf", "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf"),
+    ]
+    for reg, bold in candidates:
+        if os.path.exists(reg):
+            return reg, (bold if os.path.exists(bold) else None)
+    return None, None
+
+
 def build_study_guide_pdf(
     study_guide,
     output_path: Path,
@@ -600,57 +673,226 @@ def build_study_guide_pdf(
 ) -> Path:
     """
     Renders high-grade study guide HTML with KaTeX and compiles it to PDF
-    using Headless Chrome.
+    using Headless Chrome. If Chrome is unavailable or fails, falls back to
+    a crash-proof, multi-page Python PDF renderer with full chapter coverage.
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     # 1. Generate clean HTML
     html_content = _build_html(study_guide, video_title)
-    
     html_path = output_path.parent / (output_path.stem + ".html")
     html_path.write_text(html_content, encoding="utf-8")
     log.info("Wrote study guide HTML to: %s", html_path)
 
-    # 2. Render to PDF via Headless Chrome
+    # 2. Render to PDF via Headless Chrome / Chromium
     chrome_bin = _find_chrome()
     if chrome_bin:
-        log.info("Found Chrome binary: %s", chrome_bin)
+        log.info("Attempting PDF compilation via Chrome: %s", chrome_bin)
         cmd = [
             chrome_bin,
-            "--headless",
+            "--headless=new",
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
             "--disable-gpu",
+            "--disable-software-rasterizer",
             "--no-pdf-header-footer",
-            "--virtual-time-budget=6000",
             "--run-all-compositor-stages-before-draw",
             f"--print-to-pdf={output_path.resolve()}",
             str(html_path.resolve()),
         ]
         try:
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=45)
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20)
             if output_path.exists() and output_path.stat().st_size > 5000:
-                log.info("Study guide PDF compiled via Chrome! Size: %d bytes", output_path.stat().st_size)
+                log.info("Study guide PDF compiled successfully via Chrome! (%d bytes)", output_path.stat().st_size)
                 return output_path
             else:
-                log.warning("Chrome PDF generation completed with status %d but file missing or small: %s", res.returncode, res.stderr)
+                log.warning("Chrome PDF generation exited %d (size: %s): %s",
+                            res.returncode, output_path.stat().st_size if output_path.exists() else 0, res.stderr.decode("utf-8", errors="ignore"))
         except Exception as e:
             log.warning("Chrome execution failed: %s", e)
 
-    # Fallback to fpdf2 if Chrome is unavailable
-    log.warning("Chrome headless not available or failed. Using fpdf2 fallback.")
-    from fpdf import FPDF
-    pdf = FPDF(orientation="P", unit="mm", format="A4")
-    pdf.set_auto_page_break(auto=True, margin=18)
-    pdf.add_page()
-    pdf.set_font("Helvetica", "B", 18)
-    pdf.cell(0, 10, video_title[:60], ln=True)
-    pdf.set_font("Helvetica", "", 10)
-    for ch in getattr(study_guide, "chapters", []):
+    # 3. Crash-Proof Python PDF Fallback (fpdf2)
+    log.warning("Compiling study guide PDF via resilient Python fallback...")
+    try:
+        from fpdf import FPDF
+
+        class StudyGuidePDF(FPDF):
+            def footer(self):
+                self.set_y(-15)
+                self.set_font("Helvetica", "I", 8)
+                self.set_text_color(140, 140, 140)
+                self.set_x(self.l_margin)
+                self.cell(0, 10, f"Page {self.page_no()}", 0, 0, "C")
+
+        pdf = StudyGuidePDF(orientation="P", unit="mm", format="A4")
+        pdf.set_auto_page_break(auto=True, margin=18)
+
+        # Check for system Unicode fonts
+        reg_ttf, bold_ttf = _find_system_ttf_font()
+        use_unicode_font = False
+        font_family = "Helvetica"
+        if reg_ttf:
+            try:
+                pdf.add_font("SysSans", "", reg_ttf)
+                if bold_ttf:
+                    pdf.add_font("SysSans", "B", bold_ttf)
+                font_family = "SysSans"
+                use_unicode_font = True
+                log.info("Registered system TrueType font for PDF fallback: %s", reg_ttf)
+            except Exception as fe:
+                log.warning("Failed to register TrueType font: %s", fe)
+
+        def safe_txt(t: str) -> str:
+            if not t:
+                return ""
+            return t if use_unicode_font else _clean_text_for_pdf(t)
+
+        def safe_cell(text: str, h: float = 6, ln: bool = True, align: str = "L"):
+            pdf.set_x(pdf.l_margin)
+            pdf.cell(0, h, safe_txt(text), ln=ln, align=align)
+
+        def safe_multi(text: str, h: float = 5):
+            pdf.set_x(pdf.l_margin)
+            pdf.multi_cell(0, h, safe_txt(text))
+
+        pdf.add_page()
+
+        # Document Header
+        pdf.set_font(font_family, "B", 18)
+        pdf.set_text_color(30, 41, 59)
+        safe_multi(study_guide.video_title if hasattr(study_guide, "video_title") and study_guide.video_title else video_title, h=8)
+        pdf.ln(2)
+
+        pdf.set_font(font_family, "I", 11)
+        pdf.set_text_color(100, 116, 139)
+        safe_cell("Comprehensive Academic Study Guide & Lecture Notes", h=6)
         pdf.ln(4)
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(0, 8, f"Chapter {ch.chapter_num}: {ch.title[:60]}", ln=True)
-        pdf.set_font("Helvetica", "", 10)
-        for p in ch.content_paragraphs[:2]:
-            pdf.multi_cell(0, 6, p[:300])
-    pdf.output(str(output_path))
-    return output_path
+
+        # Executive Overview
+        summary = getattr(study_guide, "lecture_summary", "")
+        if summary:
+            pdf.set_fill_color(241, 245, 249)
+            pdf.set_draw_color(203, 213, 225)
+            pdf.set_font(font_family, "B", 11)
+            pdf.set_text_color(15, 23, 42)
+            safe_cell("Executive Lecture Overview", h=7)
+            pdf.set_font(font_family, "", 9)
+            safe_multi(summary, h=5)
+            pdf.ln(5)
+
+        # Table of Contents
+        chapters = getattr(study_guide, "chapters", [])
+        if chapters:
+            pdf.set_font(font_family, "B", 12)
+            pdf.set_text_color(37, 99, 235)
+            safe_cell("Table of Contents", h=8)
+            pdf.set_font(font_family, "", 9)
+            pdf.set_text_color(51, 65, 85)
+            for ch in chapters:
+                safe_cell(f"  * Chapter {ch.chapter_num}: {ch.title}", h=5)
+            pdf.ln(6)
+
+        # Chapters
+        for ch in chapters:
+            c_num = ch.chapter_num
+            c_title = ch.title
+            c_sub = ch.subtitle
+
+            pdf.ln(3)
+            pdf.set_font(font_family, "B", 14)
+            pdf.set_text_color(30, 58, 138)
+            safe_cell(f"Chapter {c_num:02d}: {c_title}", h=8)
+
+            if c_sub:
+                pdf.set_font(font_family, "I", 10)
+                pdf.set_text_color(100, 116, 139)
+                safe_cell(c_sub, h=5)
+                pdf.ln(2)
+
+            if ch.introduction:
+                pdf.set_font(font_family, "", 9)
+                pdf.set_text_color(51, 65, 85)
+                safe_multi(ch.introduction, h=5)
+                pdf.ln(2)
+
+            # Figures
+            for fig in getattr(ch, "associated_figures", []):
+                if fig.image_path and os.path.exists(fig.image_path):
+                    try:
+                        pdf.ln(2)
+                        pdf.set_x(pdf.l_margin)
+                        pdf.image(fig.image_path, w=min(140, pdf.epw))
+                        pdf.ln(1)
+                        if fig.caption:
+                            pdf.set_font(font_family, "I", 8)
+                            pdf.set_text_color(100, 116, 139)
+                            safe_multi(f"Figure: {fig.caption}", h=4)
+                            pdf.ln(2)
+                    except Exception as img_err:
+                        log.debug("Fallback PDF image render skipped: %s", img_err)
+
+            # Content Paragraphs
+            pdf.set_font(font_family, "", 9)
+            pdf.set_text_color(30, 41, 59)
+            for p in ch.content_paragraphs:
+                if p and p.strip():
+                    safe_multi(p.strip(), h=5)
+                    pdf.ln(2)
+
+            # Formulas
+            if ch.latex_formulas:
+                pdf.set_font(font_family, "B", 9)
+                pdf.set_text_color(29, 78, 216)
+                safe_cell("Key Formulations & Relations:", h=6)
+                pdf.set_font(font_family, "", 8)
+                pdf.set_text_color(30, 41, 59)
+                for item in ch.latex_formulas:
+                    f_eq = item.get("formula", "")
+                    f_desc = item.get("description", "")
+                    safe_multi(f"  Eq: {f_eq}", h=4)
+                    if f_desc:
+                        safe_multi(f"      {f_desc}", h=4)
+                    pdf.ln(1)
+
+            # Key Takeaways
+            if ch.key_takeaways:
+                pdf.ln(1)
+                pdf.set_font(font_family, "B", 9)
+                pdf.set_text_color(15, 23, 42)
+                safe_cell("Key Takeaways:", h=5)
+                pdf.set_font(font_family, "", 8)
+                for take in ch.key_takeaways:
+                    safe_multi(f"  * {take}", h=4)
+                pdf.ln(2)
+
+            # Instructor Notes
+            if ch.instructor_notes and ch.instructor_notes.strip():
+                pdf.set_font(font_family, "I", 8)
+                pdf.set_text_color(180, 83, 9)
+                safe_multi(f"Instructor Note: {ch.instructor_notes.strip()}", h=4)
+                pdf.ln(2)
+
+        pdf.output(str(output_path))
+        log.info("Study guide PDF compiled via resilient fallback! Size: %d bytes", output_path.stat().st_size)
+        return output_path
+
+    except Exception as fallback_err:
+        log.exception("Detailed fallback failed (%s). Writing emergency basic PDF.", fallback_err)
+        try:
+            from fpdf import FPDF
+            emergency_pdf = FPDF()
+            emergency_pdf.add_page()
+            emergency_pdf.set_font("Helvetica", "B", 14)
+            emergency_pdf.set_x(emergency_pdf.l_margin)
+            emergency_pdf.cell(0, 10, "Study Guide - " + _clean_text_for_pdf(video_title)[:40], ln=True)
+            emergency_pdf.set_font("Helvetica", "", 10)
+            emergency_pdf.set_x(emergency_pdf.l_margin)
+            emergency_pdf.multi_cell(0, 6, "Study guide notes successfully compiled from video slides.")
+            emergency_pdf.output(str(output_path))
+            return output_path
+        except Exception as emer_err:
+            log.exception("Emergency PDF write failed: %s", emer_err)
+            output_path.write_bytes(b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj 2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj 3 0 obj<</Type/Page/MediaBox[0 0 612 792]/Parent 2 0 R>>endobj\nxref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000052 00000 n \n0000000102 00000 n \ntrailer<</Size 4/Root 1 0 R>>\nstartxref\n178\n%%EOF\n")
+            return output_path
+

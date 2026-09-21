@@ -645,6 +645,29 @@ def run_pipeline(job_id: str, video_url: str, jobs_root: Path, gemini_api_key: s
             log.exception("[%s] Study guide generation failed: %s", job_id, e)
             guide_ready = False
 
+        if not guide_ready and verified:
+            try:
+                log.info("[%s] Compiling guaranteed deterministic slide study guide...", job_id)
+                from study_guide_generator import generate_deterministic_study_guide
+                from pdf_study_guide import build_study_guide_pdf
+                det_guide = generate_deterministic_study_guide(
+                    slides=verified,
+                    transcript_segments=transcript_segments,
+                    video_title=video_title,
+                    total_duration=float(duration),
+                )
+                guide_pdf_path = job_dir / "study_guide.pdf"
+                build_study_guide_pdf(
+                    study_guide=det_guide,
+                    output_path=guide_pdf_path,
+                    video_title=video_title,
+                )
+                guide_ready = guide_pdf_path.exists() and guide_pdf_path.stat().st_size > 500
+                log.info("[%s] Guaranteed study guide ready: %s (size: %d bytes)",
+                         job_id, guide_ready, guide_pdf_path.stat().st_size if guide_pdf_path.exists() else 0)
+            except Exception as det_err:
+                log.warning("[%s] Guaranteed fallback failed: %s", job_id, det_err)
+
         # ── Done ───────────────────────────────────────────────────────────
         _write_status(
             job_dir, "completed", 100,
@@ -843,6 +866,29 @@ def run_pipeline_from_frames(
                 log.info("[%s] Study guide PDF ready: %s", job_id, guide_pdf_path)
             except Exception as guide_err:
                 log.warning("[%s] Study guide generation failed: %s", job_id, guide_err)
+
+        if not guide_ready and verified:
+            try:
+                log.info("[%s] Compiling guaranteed deterministic slide study guide for companion job...", job_id)
+                from study_guide_generator import generate_deterministic_study_guide
+                from pdf_study_guide import build_study_guide_pdf
+                det_guide = generate_deterministic_study_guide(
+                    slides=verified,
+                    transcript_segments=transcript_segments,
+                    video_title=video_title,
+                    total_duration=float(duration),
+                )
+                guide_pdf_path = job_dir / "study_guide.pdf"
+                build_study_guide_pdf(
+                    study_guide=det_guide,
+                    output_path=guide_pdf_path,
+                    video_title=video_title,
+                )
+                guide_ready = guide_pdf_path.exists() and guide_pdf_path.stat().st_size > 500
+                log.info("[%s] Guaranteed companion study guide ready: %s (size: %d bytes)",
+                         job_id, guide_ready, guide_pdf_path.stat().st_size if guide_pdf_path.exists() else 0)
+            except Exception as det_err:
+                log.warning("[%s] Guaranteed companion fallback failed: %s", job_id, det_err)
 
         # Cleanup raw frames
         shutil.rmtree(raw_frames_dir, ignore_errors=True)

@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-# Install system dependencies: ffmpeg, OpenCV runtime libs, Deno (for JS challenge solving), and bgutil-pot (for PO Token generation)
+# Install system dependencies: ffmpeg, OpenCV runtime libs, Chromium (for study guide PDF compilation), fonts, Deno, and bgutil-pot
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libgl1 \
@@ -8,6 +8,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     unzip \
+    chromium \
+    chromium-sandbox \
+    fonts-liberation \
+    fonts-dejavu-core \
+    fonts-noto-color-emoji \
     && curl -fsSL https://deno.land/install.sh | sh -s -- -y \
     && cp /root/.deno/bin/deno /usr/local/bin/deno \
     && curl -fSL -A "Mozilla/5.0" "https://github.com/jim60105/bgutil-ytdlp-pot-provider-rs/releases/download/v0.8.1/bgutil-pot-linux-x86_64" -o /usr/local/bin/bgutil-pot \
