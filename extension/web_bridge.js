@@ -1,7 +1,7 @@
 /**
  * web_bridge.js — YT2PDF Companion Web Bridge
- * Injected on yt2pdfs.com and *.run.app to allow seamless silent background
- * extraction when the user pastes a YouTube URL into the web application.
+ * Injected on yt2pdfs.com and *.run.app to allow seamless silent in-page
+ * extraction without opening ANY new tabs or windows in the user's browser.
  */
 
 (function () {
@@ -22,7 +22,7 @@
       }
       window.__YT2PDF_COMPANION_ACTIVE__ = true;
 
-      // Dual-channel broadcast (CustomEvent + postMessage)
+      // Broadcast companion availability
       window.dispatchEvent(new CustomEvent("YT2PDF_COMPANION_READY", {
         detail: { version: "1.0.0", active: true }
       }));
@@ -36,7 +36,7 @@
     document.addEventListener("DOMContentLoaded", signalActive);
   }
 
-  // Re-broadcast periodically for late-initializing SPAs
+  // Periodic announcement for late-initializing SPAs
   let announceCount = 0;
   const announcer = setInterval(() => {
     if (!isExtensionContextValid()) {
@@ -55,11 +55,26 @@
 
   let isExtracting = false;
   let lastExtractionTime = 0;
+  let activeExtractorIframe = null;
+  let extractorWatchdog = null;
+
+  function cleanupExtractorIframe() {
+    if (extractorWatchdog) {
+      clearTimeout(extractorWatchdog);
+      extractorWatchdog = null;
+    }
+    if (activeExtractorIframe) {
+      try {
+        activeExtractorIframe.remove();
+      } catch (e) {}
+      activeExtractorIframe = null;
+    }
+  }
 
   function executeExtraction(videoUrl) {
     const now = Date.now();
     if (isExtracting || (now - lastExtractionTime < 4000)) {
-      console.log("[YT2PDF Bridge] Extraction already in progress or debounced; ignoring duplicate trigger.");
+      console.log("[YT2PDF Bridge] Extraction already in progress; ignoring duplicate trigger.");
       return;
     }
 
@@ -73,72 +88,101 @@
       return;
     }
 
+    cleanupExtractorIframe();
+
+    let rawUrl = videoUrl;
+    try {
+      const u = new URL(rawUrl);
+      let videoId = "";
+      if (u.hostname.includes("youtu.be")) {
+        videoId = u.pathname.replace(/^\//, "").split("?")[0];
+      } else if (u.pathname.includes("/shorts/")) {
+        videoId = u.pathname.split("/shorts/")[1]?.split("/")[0];
+      } else if (u.searchParams.has("v")) {
+        videoId = u.searchParams.get("v");
+      }
+      if (videoId) {
+        rawUrl = `https://www.youtube.com/watch?v=${videoId}`;
+      }
+    } catch (e) {}
+
+    const target = new URL(rawUrl);
+    target.searchParams.set("autoplay", "1");
+    target.searchParams.set("mute", "1");
+    target.searchParams.set("yt2pdf_headless", "1");
+
     isExtracting = true;
     lastExtractionTime = now;
-    console.log("[YT2PDF Bridge] Forwarding silent extraction request to background worker for:", videoUrl);
+    console.log("[YT2PDF Bridge] Starting completely silent in-page hidden extraction for:", target.toString());
 
-    try {
-      chrome.runtime.sendMessage({
-        action: "start_background_extraction",
-        video_url: videoUrl,
-        origin_url: window.location.origin
-      }, (response) => {
-        const lastErr = chrome?.runtime?.lastError;
-        if (lastErr) {
-          console.warn("[YT2PDF Bridge] Runtime error:", lastErr.message);
-          dispatchResult({ success: false, error: lastErr.message });
-        } else if (response && response.success) {
-          console.log("[YT2PDF Bridge] Silent background extraction succeeded! Job ID:", response.job_id);
-          dispatchResult({
-            success: true,
-            job_id: response.job_id,
-            backend_base: response.backend_base,
-            slide_count: response.slide_count
-          });
-        } else {
-          console.warn("[YT2PDF Bridge] Extraction failed:", response?.error);
-          dispatchResult({ success: false, error: response?.error || "Silent background extraction failed." });
-        }
+    // Create 100% INVISIBLE in-page extractor iframe.
+    // Zero new tabs. Zero new windows. 100% hidden from the user.
+    const iframe = document.createElement("iframe");
+    iframe.id = "yt2pdf-headless-extractor";
+    iframe.src = target.toString();
+    iframe.style.cssText = "position:fixed; left:-9999px; top:-9999px; width:800px; height:600px; opacity:0.001; pointer-events:none; border:none; z-index:-999999;";
+    activeExtractorIframe = iframe;
+
+    extractorWatchdog = setTimeout(() => {
+      console.warn("[YT2PDF Bridge] Extraction iframe timed out after 65s.");
+      dispatchResult({
+        success: false,
+        error: "Slide extraction timed out. Please check that the YouTube video is publicly accessible and try again."
       });
-    } catch (err) {
-      console.warn("[YT2PDF Bridge] Error sending message:", err.message);
-      dispatchResult({ success: false, error: err.message });
-    }
+    }, 65000);
+
+    (document.body || document.documentElement).appendChild(iframe);
   }
 
   function dispatchResult(detail) {
+    cleanupExtractorIframe();
     isExtracting = false;
     window.dispatchEvent(new CustomEvent("YT2PDF_EXTRACTION_RESULT", { detail }));
     window.postMessage({ type: "YT2PDF_EXTRACTION_RESULT", detail }, "*");
   }
 
-  // Listen for extraction requests dispatched by webpage (CustomEvent & postMessage)
+  // Listen for extraction requests dispatched by webpage
   window.addEventListener("YT2PDF_START_EXTRACTION", (event) => {
     executeExtraction(event?.detail?.video_url);
   });
 
+  // Listen for messages from the embedded extractor iframe and webpage
   window.addEventListener("message", (event) => {
-    if (event.data?.type === "YT2PDF_START_EXTRACTION" && event.data?.video_url) {
-      executeExtraction(event.data.video_url);
+    // 1. Progress updates from iframe
+    if (event.data?.type === "YT2PDF_HEADLESS_PROGRESS") {
+      window.dispatchEvent(new CustomEvent("YT2PDF_EXTRACTION_PROGRESS", {
+        detail: { current: event.data.current, total: event.data.total }
+      }));
+      window.postMessage({ type: "YT2PDF_EXTRACTION_PROGRESS", current: event.data.current, total: event.data.total }, "*");
     }
+
+    // 2. Extraction completion from iframe
+    if (event.data?.type === "YT2PDF_HEADLESS_COMPLETE") {
+      console.log("[YT2PDF Bridge] Silent in-page extraction succeeded! Job ID:", event.data.job_id);
+      dispatchResult({
+        success: true,
+        job_id: event.data.job_id,
+        backend_base: event.data.backend_base,
+        slide_count: event.data.slide_count
+      });
+    }
+
+    // 3. Extraction failure from iframe
+    if (event.data?.type === "YT2PDF_HEADLESS_ERROR") {
+      console.warn("[YT2PDF Bridge] In-page extraction error:", event.data.error);
+      dispatchResult({
+        success: false,
+        error: event.data.error || "Slide extraction failed."
+      });
+    }
+
+    // 4. Ping/pong handshakes
     if (event.data?.type === "YT2PDF_PING") {
       signalActive();
       window.dispatchEvent(new CustomEvent("YT2PDF_PONG", { detail: { version: "1.0.0", active: true } }));
       window.postMessage({ type: "YT2PDF_PONG", version: "1.0.0", active: true }, "*");
     }
   });
-
-  // Forward background extraction progress to webpage
-  try {
-    chrome.runtime.onMessage.addListener((msg) => {
-      if (msg && msg.action === "extraction_progress_update") {
-        window.dispatchEvent(new CustomEvent("YT2PDF_EXTRACTION_PROGRESS", {
-          detail: { current: msg.current, total: msg.total }
-        }));
-        window.postMessage({ type: "YT2PDF_EXTRACTION_PROGRESS", current: msg.current, total: msg.total }, "*");
-      }
-    });
-  } catch (e) {}
 
   // Also listen for ping requests from webpage via CustomEvent
   window.addEventListener("YT2PDF_PING", () => {

@@ -21,7 +21,8 @@
     "storage",
     "activeTab",
     "tabs",
-    "scripting"
+    "scripting",
+    "declarativeNetRequest"
   ],
   "background": {
     "service_worker": "background.js"
@@ -42,6 +43,7 @@
       "js": [
         "content.js"
       ],
+      "all_frames": true,
       "run_at": "document_end"
     },
     {

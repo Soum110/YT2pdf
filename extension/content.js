@@ -594,6 +594,15 @@
           current: i + 1,
           total: finalPoints.length
         });
+        if (window.parent && window.parent !== window) {
+          try {
+            window.parent.postMessage({
+              type: "YT2PDF_HEADLESS_PROGRESS",
+              current: i + 1,
+              total: finalPoints.length
+            }, "*");
+          } catch(e) {}
+        }
 
         // Seek to target timestamp with unthrottled worker race
         await Promise.race([
@@ -660,34 +669,58 @@
         transcript: transcriptSegments
       };
 
+      const notifyParentComplete = (jobId, base) => {
+        if (window.parent && window.parent !== window) {
+          try {
+            window.parent.postMessage({
+              type: "YT2PDF_HEADLESS_COMPLETE",
+              success: true,
+              job_id: jobId,
+              backend_base: base,
+              slide_count: capturedSlides.length
+            }, "*");
+          } catch(e) {}
+        }
+      };
+
+      const notifyParentError = (errMsg) => {
+        if (window.parent && window.parent !== window) {
+          try {
+            window.parent.postMessage({
+              type: "YT2PDF_HEADLESS_ERROR",
+              error: errMsg
+            }, "*");
+          } catch(e) {}
+        }
+      };
+
       safeSendRuntimeMessage({
         action: "upload_frames",
         payload: payload,
         headless: true
       }, (res) => {
-        if (!res || !res.success) {
-          console.warn("[YT2PDF Companion] safeSendRuntimeMessage upload failed or timed out, trying direct upload fallback...");
+        if (res && res.success && res.data) {
+          notifyParentComplete(res.data.job_id, res.data.backend_base);
+        } else {
+          console.warn("[YT2PDF Companion] Background worker upload failed or timed out, trying direct upload fallback...");
           directUploadFrames(payload).then((directRes) => {
-            safeSendRuntimeMessage({
-              action: "headless_extraction_direct_success",
-              data: directRes,
-              slide_count: capturedSlides.length
-            });
+            notifyParentComplete(directRes.job_id, directRes.backend_base);
           }).catch((dErr) => {
-            safeSendRuntimeMessage({
-              action: "headless_extraction_failed",
-              error: dErr.message
-            });
+            notifyParentError(dErr.message);
           });
         }
       });
 
     } catch (err) {
       console.error("[YT2PDF Companion] Silent extraction error:", err);
-      safeSendRuntimeMessage({
-        action: "headless_extraction_failed",
-        error: err.message
-      });
+      if (window.parent && window.parent !== window) {
+        try {
+          window.parent.postMessage({
+            type: "YT2PDF_HEADLESS_ERROR",
+            error: err.message
+          }, "*");
+        } catch(e) {}
+      }
     }
   }
 
