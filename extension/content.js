@@ -355,24 +355,53 @@
   async function runHeadlessExtraction() {
     console.log("[YT2PDF Companion] Initializing silent background extraction...");
 
-    // 1. Dedicated inline Web Worker to completely bypass Chrome's background tab timer throttling
+    // 0. Spoof document visibility to keep YouTube player actively decoding
+    try {
+      Object.defineProperty(document, "hidden", { get: () => false, configurable: true });
+      Object.defineProperty(document, "visibilityState", { get: () => "visible", configurable: true });
+      Object.defineProperty(document, "webkitVisibilityState", { get: () => "visible", configurable: true });
+      window.dispatchEvent(new Event("visibilitychange"));
+    } catch (e) {}
+
+    // 1. Dedicated inline Web Worker with guaranteed timeout fallback
     let unthrottledSleep = (ms) => new Promise(r => setTimeout(r, ms));
     try {
+      let workerActive = false;
       const workerBlob = new Blob([
         "self.onmessage = function(e) { setTimeout(function() { self.postMessage(e.data); }, e.data.ms); };"
       ], { type: "application/javascript" });
       const timerWorker = new Worker(URL.createObjectURL(workerBlob));
+      timerWorker.onerror = () => {
+        workerActive = false;
+      };
+      workerActive = true;
       unthrottledSleep = function(ms) {
         return new Promise((resolve) => {
-          const id = Math.random();
-          const handler = (e) => {
-            if (e.data && e.data.id === id) {
-              timerWorker.removeEventListener("message", handler);
+          let settled = false;
+          const finish = () => {
+            if (!settled) {
+              settled = true;
               resolve();
             }
           };
-          timerWorker.addEventListener("message", handler);
-          timerWorker.postMessage({ id, ms });
+          // Fail-safe setTimeout ensures resolution even if Worker is blocked by CSP
+          setTimeout(finish, ms);
+
+          if (workerActive) {
+            const id = Math.random();
+            const handler = (e) => {
+              if (e.data && e.data.id === id) {
+                timerWorker.removeEventListener("message", handler);
+                finish();
+              }
+            };
+            timerWorker.addEventListener("message", handler);
+            try {
+              timerWorker.postMessage({ id, ms });
+            } catch (e) {
+              finish();
+            }
+          }
         });
       };
     } catch(e) {
@@ -393,6 +422,31 @@
       }
     } catch(e) {}
 
+    function dismissOverlaysAndSkipAds(videoEl) {
+      // Fast-forward ads
+      if (document.querySelector(".ad-showing, .ad-interrupting, .ytp-ad-player-overlay")) {
+        if (videoEl) {
+          try { videoEl.currentTime = (videoEl.duration || 9999); } catch(e) {}
+        }
+      }
+      const skipBtn = document.querySelector(".ytp-skip-ad-button, .ytp-ad-skip-button, .ytp-ad-skip-button-modern");
+      if (skipBtn) {
+        try { skipBtn.click(); } catch (e) {}
+      }
+
+      // Auto-click consent / confirm dialogs if present
+      const consentBtn = document.querySelector("ytd-button-renderer#confirm-button button, button[aria-label*='Accept all'], button[aria-label*='Agree']");
+      if (consentBtn) {
+        try { consentBtn.click(); } catch(e) {}
+      }
+
+      // Auto-click play button if needed
+      const playBtn = document.querySelector(".ytp-large-play-button, .ytp-play-button");
+      if (playBtn) {
+        try { playBtn.click(); } catch(e) {}
+      }
+    }
+
     let video = null;
     let resolvedDuration = 0;
     const waitStart = Date.now();
@@ -400,6 +454,18 @@
     // 3. Actively wake up YouTube player & resolve duration
     while (Date.now() - waitStart < 15000) {
       video = document.querySelector("video.html5-main-video, video");
+      dismissOverlaysAndSkipAds(video);
+
+      // Check for YouTube fatal error (e.g. video private/deleted)
+      const errorScreen = document.querySelector(".ytp-error");
+      if (errorScreen && errorScreen.offsetParent !== null) {
+        const errReason = errorScreen.querySelector(".ytp-error-content-reason")?.textContent?.trim() || "Video unavailable";
+        safeSendRuntimeMessage({
+          action: "headless_extraction_failed",
+          error: `YouTube error: ${errReason}`
+        });
+        return;
+      }
 
       // 1. og:video:duration (exact integer seconds)
       if (!resolvedDuration) {
@@ -448,24 +514,6 @@
         if (!resolvedDuration && video.duration && !isNaN(video.duration) && video.duration > 0) {
           resolvedDuration = Math.floor(video.duration);
         }
-      }
-
-      // Auto-click consent / confirm dialogs if present
-      const consentBtn = document.querySelector("ytd-button-renderer#confirm-button button, button[aria-label*='Accept all'], button[aria-label*='Agree']");
-      if (consentBtn) {
-        try { consentBtn.click(); } catch(e) {}
-      }
-
-      // Auto-click play button if needed
-      const playBtn = document.querySelector(".ytp-large-play-button, .ytp-play-button");
-      if (playBtn) {
-        try { playBtn.click(); } catch(e) {}
-      }
-
-      // Auto-skip ad if present
-      const skipBtn = document.querySelector(".ytp-skip-ad-button, .ytp-ad-skip-button, .ytp-ad-skip-button-modern");
-      if (skipBtn) {
-        try { skipBtn.click(); } catch (e) {}
       }
 
       if (video && resolvedDuration > 0) {

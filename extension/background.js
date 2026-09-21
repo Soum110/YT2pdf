@@ -12,8 +12,50 @@ const BACKEND_URLS = [
   "http://127.0.0.1:8000"
 ];
 
-// Track pending silent background extractions: tabId -> { sendResponse, timeout }
+// Track pending silent background extractions: tabId -> { sendResponse, timeout, originTabId, windowId, originUrl }
 const activeExtractions = new Map();
+
+function cleanupExtraction(tabId, errorMsg = null, successData = null) {
+  let pending = (tabId && activeExtractions.has(tabId)) ? activeExtractions.get(tabId) : null;
+  if (!pending && activeExtractions.size > 0) {
+    tabId = activeExtractions.keys().next().value;
+    pending = activeExtractions.get(tabId);
+  }
+  if (!pending) return;
+
+  if (pending.timeout) {
+    clearTimeout(pending.timeout);
+  }
+  activeExtractions.delete(tabId);
+
+  // Close the offscreen extraction window completely (or tab if fallback)
+  if (pending.windowId) {
+    chrome.windows.remove(pending.windowId).catch(() => {});
+  } else if (tabId) {
+    chrome.tabs.remove(tabId).catch(() => {});
+  }
+
+  // Refocus user's origin tab if needed
+  if (pending.originTabId) {
+    chrome.tabs.update(pending.originTabId, { active: true }).catch(() => {});
+  }
+
+  try {
+    if (successData) {
+      pending.sendResponse({
+        success: true,
+        job_id: successData.job_id,
+        backend_base: successData.backend_base || "https://yt2pdfs.com",
+        slide_count: successData.slide_count || 0
+      });
+    } else {
+      pending.sendResponse({
+        success: false,
+        error: errorMsg || "Background slide extraction failed."
+      });
+    }
+  } catch (e) {}
+}
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // 1. Silent Background Extraction requested from YT2PDFS Website
@@ -41,47 +83,63 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       target.searchParams.set("yt2pdf_headless", "1");
 
       const originTabId = sender.tab?.id;
-      console.log("[YT2PDF Background] Launching high-speed extraction tab for:", target.toString(), "Origin tab:", originTabId);
+      const originUrl = message.origin_url || null;
+      console.log("[YT2PDF Background] Launching offscreen extraction window for:", target.toString(), "Origin:", originUrl);
 
-      chrome.tabs.create({
+      // Open in a completely isolated off-screen popup window so NO TAB appears in the user's tab section
+      chrome.windows.create({
         url: target.toString(),
-        active: false
-      }, (tab) => {
-        if (chrome.runtime.lastError || !tab) {
-          sendResponse({
-            success: false,
-            error: chrome.runtime.lastError?.message || "Failed to create extraction tab."
+        type: "popup",
+        focused: false,
+        left: 25000,
+        top: 25000,
+        width: 800,
+        height: 600
+      }, (win) => {
+        if (chrome.runtime.lastError || !win) {
+          console.warn("[YT2PDF Background] chrome.windows.create failed, falling back to tab:", chrome.runtime.lastError?.message);
+          // Fallback to active: false tab only if window creation failed
+          chrome.tabs.create({ url: target.toString(), active: false }, (tab) => {
+            if (chrome.runtime.lastError || !tab) {
+              sendResponse({ success: false, error: chrome.runtime.lastError?.message || "Failed to create extraction process." });
+              return;
+            }
+            registerExtraction(tab.id, null, originTabId, originUrl, sendResponse);
           });
           return;
         }
 
-        const tabId = tab.id;
-        try {
-          chrome.tabs.update(tabId, { muted: true }).catch(() => {});
-        } catch (e) {}
-        const timeout = setTimeout(() => {
-          console.warn(`[YT2PDF Background] Tab ${tabId} timed out during slide extraction.`);
-          chrome.tabs.remove(tabId).catch(() => {});
-          if (originTabId) {
-            chrome.tabs.update(originTabId, { active: true }).catch(() => {});
-          }
-          if (activeExtractions.has(tabId)) {
-            const pending = activeExtractions.get(tabId);
-            activeExtractions.delete(tabId);
-            pending.sendResponse({
-              success: false,
-              error: "Slide extraction timed out. Please check that the video is publicly playable and try again."
-            });
-          }
-        }, 75000);
-
-        activeExtractions.set(tabId, { sendResponse, timeout, originTabId });
+        const windowId = win.id;
+        if (win.tabs && win.tabs.length > 0 && win.tabs[0].id) {
+          registerExtraction(win.tabs[0].id, windowId, originTabId, originUrl, sendResponse);
+        } else {
+          chrome.tabs.query({ windowId: windowId }, (tabs) => {
+            const tabId = (tabs && tabs[0]) ? tabs[0].id : null;
+            registerExtraction(tabId, windowId, originTabId, originUrl, sendResponse);
+          });
+        }
       });
     } catch (e) {
       sendResponse({ success: false, error: "Invalid video URL: " + e.message });
     }
 
     return true; // Keep channel open for async response
+  }
+
+  function registerExtraction(tabId, windowId, originTabId, originUrl, sendResponse) {
+    if (tabId) {
+      try {
+        chrome.tabs.update(tabId, { muted: true }).catch(() => {});
+      } catch (e) {}
+    }
+
+    const key = tabId || `win_${windowId}`;
+    const timeout = setTimeout(() => {
+      console.warn(`[YT2PDF Background] Extraction for window ${windowId} (tab ${tabId}) timed out.`);
+      cleanupExtraction(key, "Slide extraction timed out. Please check that the video is publicly playable and try again.");
+    }, 75000);
+
+    activeExtractions.set(key, { sendResponse, timeout, originTabId, windowId, originUrl });
   }
 
   // 1b. Headless extraction progress forwarding to website
@@ -104,55 +162,44 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // 2. Headless tab reported failure
   if (message.action === "headless_extraction_failed") {
     let tabId = sender.tab?.id;
-    let pending = (tabId && activeExtractions.has(tabId)) ? activeExtractions.get(tabId) : null;
-    if (!pending && activeExtractions.size > 0) {
-      const firstKey = activeExtractions.keys().next().value;
-      pending = activeExtractions.get(firstKey);
-      tabId = firstKey;
-    }
-    if (pending) {
-      clearTimeout(pending.timeout);
-      if (tabId) chrome.tabs.remove(tabId).catch(() => {});
-      if (pending.originTabId) {
-        chrome.tabs.update(pending.originTabId, { active: true }).catch(() => {});
-      }
-      activeExtractions.delete(tabId);
-      pending.sendResponse({ success: false, error: message.error || "Background extraction failed." });
-    }
+    cleanupExtraction(tabId, message.error || "Background slide extraction failed.");
     return false;
   }
 
   // 2b. Headless tab reported direct upload success
   if (message.action === "headless_extraction_direct_success") {
     let tabId = sender.tab?.id;
-    let pending = (tabId && activeExtractions.has(tabId)) ? activeExtractions.get(tabId) : null;
-    if (!pending && activeExtractions.size > 0) {
-      const firstKey = activeExtractions.keys().next().value;
-      pending = activeExtractions.get(firstKey);
-      tabId = firstKey;
-    }
-    if (pending) {
-      clearTimeout(pending.timeout);
-      if (tabId) chrome.tabs.remove(tabId).catch(() => {});
-      if (pending.originTabId) {
-        chrome.tabs.update(pending.originTabId, { active: true }).catch(() => {});
-      }
-      activeExtractions.delete(tabId);
-      pending.sendResponse({
-        success: true,
-        job_id: message.data?.job_id,
-        backend_base: message.data?.backend_base || "https://yt2pdfs.com",
-        slide_count: message.slide_count || 0
-      });
-    }
+    cleanupExtraction(tabId, null, {
+      job_id: message.data?.job_id,
+      backend_base: message.data?.backend_base || "https://yt2pdfs.com",
+      slide_count: message.slide_count || 0
+    });
     return false;
   }
 
-  // 3. Upload frames to backend (shared by both YouTube button & silent background tab)
+  // 3. Upload frames to backend
   if (message.action === "upload_frames") {
     (async () => {
+      let tabId = sender.tab?.id;
+      let pending = (tabId && activeExtractions.has(tabId)) ? activeExtractions.get(tabId) : null;
+      if (!pending && activeExtractions.size > 0) {
+        pending = activeExtractions.values().next().value;
+        tabId = activeExtractions.keys().next().value;
+      }
+
+      // Prioritize candidate base URLs (originUrl first if provided)
+      const candidateBases = [];
+      if (pending?.originUrl && !candidateBases.includes(pending.originUrl)) {
+        candidateBases.push(pending.originUrl);
+      }
+      for (const b of BACKEND_URLS) {
+        if (!candidateBases.includes(b)) {
+          candidateBases.push(b);
+        }
+      }
+
       let lastError = null;
-      for (const base of BACKEND_URLS) {
+      for (const base of candidateBases) {
         try {
           console.log(`[YT2PDF Background] Attempting upload to ${base}...`);
           const res = await fetch(`${base}/api/companion/upload-frames`, {
@@ -169,31 +216,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             console.log(`[YT2PDF Background] Upload successful to ${base}! Job ID:`, data.job_id);
             data.backend_base = base;
 
-            // If this upload came from a silent background tab, complete the pending web bridge request and close tab!
-            let tabId = sender.tab?.id;
-            let pending = (tabId && activeExtractions.has(tabId)) ? activeExtractions.get(tabId) : null;
-            if (!pending && activeExtractions.size > 0) {
-              const firstKey = activeExtractions.keys().next().value;
-              pending = activeExtractions.get(firstKey);
-              tabId = firstKey;
-            }
+            // Resolve calling tab first
+            sendResponse({ success: true, data: data });
+
+            // If this upload came from silent background extraction, resolve bridge promise and destroy window!
             if (pending) {
-              console.log(`[YT2PDF Background] Resolving silent extraction for tab ${tabId} with Job ID ${data.job_id}`);
-              clearTimeout(pending.timeout);
-              if (tabId) chrome.tabs.remove(tabId).catch(() => {});
-              if (pending.originTabId) {
-                chrome.tabs.update(pending.originTabId, { active: true }).catch(() => {});
-              }
-              activeExtractions.delete(tabId);
-              pending.sendResponse({
-                success: true,
+              cleanupExtraction(tabId, null, {
                 job_id: data.job_id,
                 backend_base: base,
                 slide_count: message.payload?.frames?.length || 0
               });
             }
-
-            sendResponse({ success: true, data: data });
             return;
           } else {
             const text = await res.text();
@@ -210,24 +243,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         success: false,
         error: lastError || "Failed to reach YT2PDFS processing servers."
       });
+
+      if (pending) {
+        cleanupExtraction(tabId, lastError || "Failed to upload frames to YT2PDFS servers.");
+      }
     })();
 
     return true; // Keep message channel open for async response
   }
 });
 
+// Watch for premature window closures
+chrome.windows.onRemoved.addListener((closedWindowId) => {
+  for (const [key, pending] of activeExtractions.entries()) {
+    if (pending.windowId === closedWindowId) {
+      cleanupExtraction(key, "Background extraction window was closed.");
+      break;
+    }
+  }
+});
+
 // Watch for premature background tab closures
 chrome.tabs.onRemoved.addListener((closedTabId) => {
   if (activeExtractions.has(closedTabId)) {
-    const pending = activeExtractions.get(closedTabId);
-    clearTimeout(pending.timeout);
-    if (pending.originTabId) {
-      chrome.tabs.update(pending.originTabId, { active: true }).catch(() => {});
-    }
-    activeExtractions.delete(closedTabId);
-    pending.sendResponse({
-      success: false,
-      error: "Extraction tab was closed before completing."
-    });
+    cleanupExtraction(closedTabId, "Extraction tab was closed before completing.");
   }
 });

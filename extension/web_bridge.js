@@ -69,7 +69,8 @@
     try {
       chrome.runtime.sendMessage({
         action: "start_background_extraction",
-        video_url: videoUrl
+        video_url: videoUrl,
+        origin_url: window.location.origin
       }, (response) => {
         const lastErr = chrome?.runtime?.lastError;
         if (lastErr) {
