@@ -540,14 +540,16 @@
       await video.play().catch(() => {});
     } catch (e) {}
 
-    // Wait briefly for video stream to be ready for frame extraction
+    // Wait for video stream to be buffered enough for seek-and-capture (up to 10s in background tabs)
     const readyStart = Date.now();
-    while (Date.now() - readyStart < 4000) {
-      if (video && (video.readyState >= 2 || video.videoWidth > 0)) {
+    while (Date.now() - readyStart < 10000) {
+      if (video && video.readyState >= 3 && video.videoWidth > 0) {
         break;
       }
-      await unthrottledSleep(150);
+      await unthrottledSleep(200);
     }
+    // Brief extra settle after play starts
+    await unthrottledSleep(500);
 
     try {
       const duration = resolvedDuration;
@@ -556,7 +558,7 @@
                       document.querySelector("h1.title") ||
                       document.querySelector('meta[name="title"]');
       const videoTitle = titleEl ? (titleEl.innerText || titleEl.getAttribute("content") || "").trim() : document.title.replace(" - YouTube", "").trim();
-      const cleanUrl = window.location.href.replace(/([&?])yt2pdf_headless=1&?/, "$1").replace(/[?&]$/, "");
+      const cleanUrl = window.location.href.replace(/([\&?])yt2pdf_headless=1\&?/, "$1").replace(/[?\&]$/, "");
 
       let step = 15;
       if (duration > 3600) step = 60;
@@ -565,7 +567,9 @@
       else step = 12;
 
       const samplePoints = [];
-      for (let t = 2; t < duration - 2; t += step) {
+      // Start 5% into video (not at t=2) to avoid black intros
+      const startOffset = Math.max(Math.floor(duration * 0.05), 5);
+      for (let t = startOffset; t < duration - 5; t += step) {
         samplePoints.push(t);
       }
       const maxFrames = 15;
@@ -588,6 +592,19 @@
       const capturedSlides = [];
       let hasPreviousThumb = false;
 
+      // Helper: measure average luminance of a canvas (0–255). Returns 0 for black frames.
+      function avgLuminance(canvas) {
+        try {
+          const ctx = canvas.getContext("2d");
+          const d = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+          let sum = 0;
+          for (let k = 0; k < d.length; k += 4) {
+            sum += 0.299 * d[k] + 0.587 * d[k + 1] + 0.114 * d[k + 2];
+          }
+          return sum / (d.length / 4);
+        } catch (e) { return 0; }
+      }
+
       for (let i = 0; i < finalPoints.length; i++) {
         const timeTarget = finalPoints[i];
 
@@ -607,7 +624,7 @@
           } catch(e) {}
         }
 
-        // Seek to target timestamp with unthrottled worker race
+        // Seek with generous 3s timeout so background tabs have time to buffer
         await Promise.race([
           new Promise((resolve) => {
             const onSeeked = () => {
@@ -617,14 +634,27 @@
             video.addEventListener("seeked", onSeeked, { once: true });
             video.currentTime = timeTarget;
           }),
-          unthrottledSleep(240)
+          unthrottledSleep(3000)
         ]);
-        await unthrottledSleep(30);
+        // Wait for decoder to render the actual frame (critical in background tabs)
+        await unthrottledSleep(400);
+
+        // Extra wait if readyState indicates buffer isn't decoded yet
+        if (video.readyState < 2) {
+          await unthrottledSleep(600);
+        }
 
         const activeThumbCanvas = (capturedSlides.length % 2 === 0) ? thumbCanvasA : thumbCanvasB;
         const prevThumbCanvas = (capturedSlides.length % 2 === 0) ? thumbCanvasB : thumbCanvasA;
         const activeThumbCtx = activeThumbCanvas.getContext("2d");
         activeThumbCtx.drawImage(video, 0, 0, 32, 18);
+
+        // Skip black / nearly-black frames (avg luminance below 8/255 means frame not decoded yet)
+        const luma = avgLuminance(activeThumbCanvas);
+        if (luma < 8) {
+          console.log(`[YT2PDF Companion] Skipping black frame at t=${timeTarget}s (luma=${luma.toFixed(1)})`);
+          continue;
+        }
 
         let isDistinct = true;
         if (hasPreviousThumb) {
@@ -643,13 +673,37 @@
         }
       }
 
+      // Fallback: if ALL frames were black or none captured, seek to mid-video and try 3 times
       if (capturedSlides.length === 0) {
-        captureCtx.drawImage(video, 0, 0, 1280, 720);
-        capturedSlides.push({
-          timestamp: 0,
-          time_formatted: "0:00",
-          data: captureCanvas.toDataURL("image/jpeg", 0.72)
-        });
+        const fallbackPoints = [
+          Math.floor(duration * 0.25),
+          Math.floor(duration * 0.5),
+          Math.floor(duration * 0.75)
+        ].filter(t => t > 0 && t < duration);
+
+        for (const fbTime of fallbackPoints) {
+          await Promise.race([
+            new Promise(resolve => {
+              const onS = () => { video.removeEventListener("seeked", onS); resolve(); };
+              video.addEventListener("seeked", onS, { once: true });
+              video.currentTime = fbTime;
+            }),
+            unthrottledSleep(4000)
+          ]);
+          await unthrottledSleep(800);
+          const fbCanvas = document.createElement("canvas");
+          fbCanvas.width = 32; fbCanvas.height = 18;
+          fbCanvas.getContext("2d").drawImage(video, 0, 0, 32, 18);
+          if (avgLuminance(fbCanvas) >= 8) {
+            captureCtx.drawImage(video, 0, 0, 1280, 720);
+            capturedSlides.push({
+              timestamp: fbTime,
+              time_formatted: `${Math.floor(fbTime / 60)}:${String(fbTime % 60).padStart(2, "0")}`,
+              data: captureCanvas.toDataURL("image/jpeg", 0.72)
+            });
+            break;
+          }
+        }
       }
 
       console.log(`[YT2PDF Companion] Silent background extraction complete (${capturedSlides.length} slides). Transmitting...`);
