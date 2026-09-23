@@ -804,69 +804,14 @@ Ensure that EVERY formula shown on the slides is incorporated with complete deri
             chapters.append(ch)
 
     except Exception as e:
-        log.exception("Lecture synthesis failed, using robust multi-chapter fallback: %s", e)
-        # Partition transcript and slide metadata into 3 coherent academic chapters
-        tr_len = len(full_transcript)
-        p1 = full_transcript[: tr_len // 3].strip() or "Foundational definitions and core terminology."
-        p2 = full_transcript[tr_len // 3 : 2 * (tr_len // 3)].strip() or "Theoretical models and governing formulations."
-        p3 = full_transcript[2 * (tr_len // 3) :].strip() or "Practical applications and worked example problems."
-
-        lecture_summary = (
-            full_transcript[:600].strip()
-            if full_transcript
-            else "Comprehensive lecture study notes synthesized directly from slide visual content."
+        log.exception("Gemini lecture synthesis failed, generating comprehensive study guide from lecture transcript & topic models: %s", e)
+        return generate_deterministic_study_guide(
+            slides=slides,
+            transcript_segments=transcript_segments,
+            video_title=book_title,
+            total_duration=total_duration,
+            crops_dir=crops_dir,
         )
-
-        chapters = [
-            StudyGuideChapter(
-                chapter_num=1,
-                title="Foundational Concepts and Physical Principles",
-                subtitle="Core Motivation, Terminology & Elementary Definitions",
-                introduction="This chapter establishes the core motivation, coordinate foundations, and intuitive physical concepts presented throughout the lecture.",
-                content_paragraphs=[
-                    p1[:1000],
-                    "The primary governing principle requires establishing rigorous reference frames and consistent units for all physical quantities.",
-                ],
-                latex_formulas=[],
-                key_takeaways=[
-                    "Physical principles are invariant under choice of coordinate system.",
-                    "Carefully establish base units and reference directions before analytical evaluation.",
-                ],
-                instructor_notes="Review standard unit consistency and dimensional analysis prior to exam problems.",
-            ),
-            StudyGuideChapter(
-                chapter_num=2,
-                title="Theoretical Architecture & Analytical Formulations",
-                subtitle="Governing Equations, Vector Decomposition & Mathematical Models",
-                introduction="This chapter develops the formal analytical architecture, structural models, and component relations taught in the lecture.",
-                content_paragraphs=[
-                    p2[:1000],
-                    "Decomposition along orthogonal unit basis vectors enables systematic linear algebraic computation across multi-dimensional domains.",
-                ],
-                latex_formulas=[],
-                key_takeaways=[
-                    "Orthogonal projections decouple multi-dimensional systems into independent scalar equations.",
-                    "Verify vector norms and boundary conditions at all interface stages.",
-                ],
-                instructor_notes="Always confirm right-hand rule orientation when computing cross products and rotations.",
-            ),
-            StudyGuideChapter(
-                chapter_num=3,
-                title="Practical Applications & Solved Step-by-Step Exemplars",
-                subtitle="Engineering Implementations, Computational Methods & Problem Sets",
-                introduction="This chapter synthesizes practical engineering applications, numerical computations, and worked problem sets.",
-                content_paragraphs=[
-                    p3[:1000],
-                    "Real-world implementations require accounting for measurement tolerances, sensor calibration, and physical boundary constraints.",
-                ],
-                latex_formulas=[],
-                key_takeaways=[
-                    "Systematic algebraic substitution prevents sign errors in multi-step derivations.",
-                    "Compare analytical solutions against numerical simulations to ensure physical realism.",
-                ],
-                instructor_notes="Examine worked example problem steps carefully for common algebraic pitfalls.",
-            ),
-        ]
 
     # 6. Distribute curated figures strictly by relevance (Zero repetition)
     figures_by_id = {f.fig_id: f for f in all_figures}

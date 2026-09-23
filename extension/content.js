@@ -174,6 +174,36 @@
         });
       }
 
+      // Strategy 3: If inside an embed or script tags had no captionTracks, fetch watch page directly
+      if (!captionTracks || captionTracks.length === 0) {
+        let vId = videoId;
+        if (!vId) {
+          try {
+            const u = new URL(window.location.href);
+            vId = u.searchParams.get("v") || (u.pathname.includes("/embed/") ? u.pathname.split("/embed/")[1]?.split("?")[0] : "");
+          } catch(e) {}
+        }
+        if (vId) {
+          try {
+            console.log(`[YT2PDF Companion] Fetching watch page HTML directly for video ${vId}...`);
+            const watchRes = await fetch(`https://www.youtube.com/watch?v=${vId}`);
+            if (watchRes.ok) {
+              const html = await watchRes.text();
+              const match = html.match(/"captionTracks":\s*(\[.+?\])/);
+              if (match) {
+                const parsed = JSON.parse(match[1]);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                  captionTracks = parsed;
+                  console.log(`[YT2PDF Companion] Strategy 3 successfully recovered ${captionTracks.length} caption tracks from watch page.`);
+                }
+              }
+            }
+          } catch (watchErr) {
+            console.warn("[YT2PDF Companion] Watch page fetch error:", watchErr);
+          }
+        }
+      }
+
       if (!captionTracks || captionTracks.length === 0) {
         console.log("[YT2PDF Companion] No caption tracks detected on page.");
         return [];
@@ -788,7 +818,7 @@
       try {
         transcriptSegments = await Promise.race([
           extractTranscriptFromPage(),
-          unthrottledSleep(2000).then(() => [])
+          unthrottledSleep(12000).then(() => [])
         ]);
       } catch (trErr) {
         console.warn("[YT2PDF Companion] Transcript extraction error:", trErr);
