@@ -2809,6 +2809,8 @@
     cv_scanning:          { step: "step-cv",        label: "Scanning presentation slides..." },
     ai_verifying:         { step: "step-ai",        label: "Filtering clean slides..." },
     building_pdf:         { step: "step-slides",    label: "Compiling slide deck..." },
+    fetching_transcript:  { step: "step-slides",    label: "Finalizing slide deck..." },
+    generating_guide:     { step: "step-slides",    label: "Compiling slide deck..." },
     completed:            { step: "step-slides",    label: "Ready!" },
     failed:               { step: null,             label: "Processing failed" },
   };
@@ -3205,17 +3207,23 @@
   }
 
   function updateProgress(data) {
-    const info = STAGE_MAP[data.stage] || { step: null, label: data.stage };
+    const info = STAGE_MAP[data.stage] || { step: "step-slides", label: "Compiling slide deck..." };
     document.getElementById("stage-label").textContent = info.label;
     document.getElementById("pct-label").textContent = data.progress + "%";
     document.getElementById("progress-fill").style.width = data.progress + "%";
-    document.getElementById("progress-msg").textContent = data.message || "";
+    let cleanMsg = data.message || "";
+    if (cleanMsg.toLowerCase().includes("guide") || cleanMsg.toLowerCase().includes("transcript")) {
+      cleanMsg = "Compiling presentation slides PDF...";
+    }
+    document.getElementById("progress-msg").textContent = cleanMsg;
     const activeIdx = STEP_ORDER.indexOf(info.step);
     STEP_ORDER.forEach((sid, i) => {
       const el = document.getElementById(sid);
-      el.classList.remove("active","done");
-      if (i < activeIdx) el.classList.add("done");
-      else if (i === activeIdx) el.classList.add("active");
+      if (el) {
+        el.classList.remove("active","done");
+        if (i < activeIdx) el.classList.add("done");
+        else if (i === activeIdx) el.classList.add("active");
+      }
     });
   }
 
