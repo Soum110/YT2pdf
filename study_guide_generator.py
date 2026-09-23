@@ -549,38 +549,29 @@ RULES:
 # 5. Advanced Basic-to-Advanced Synthesis Prompt
 # ─────────────────────────────────────────────
 
-SYNTHESIS_SYSTEM_PROMPT = """You are a distinguished university professor and world-class STEM textbook author.
-Your mission is to author a definitive, rigorous, university-level academic textbook chapter that thoroughly synthesizes an entire lecture video.
+SYNTHESIS_SYSTEM_PROMPT = """You are a distinguished university professor and world-class academic textbook author.
+Your mission is to author a definitive, rigorous, university-level academic textbook chapter that thoroughly synthesizes the provided lecture video and slides.
 
-PEDAGOGICAL RIGOR & COMPLEXITY (BASIC TO ADVANCED):
-Do NOT write superficial or elementary summaries. You must build a comprehensive academic chapter that takes the student from intuitive foundational definitions up to advanced university/graduate-level theoretical formulations, full proofs, mathematical derivations, and solved exemplar problem sets:
+PEDAGOGICAL RIGOR & STRUCTURE (FOUNDATIONAL TO ADVANCED):
+Do NOT write superficial or elementary summaries. You must build a comprehensive academic chapter that takes the student from intuitive foundational definitions up to advanced university-level theoretical formulations, derivations, and solved exemplar problem sets:
 
-- Chapter 1: Foundational Motivation & Physical Concepts
-  * Intuitive definitions, physical motivation ('Why'), scalar vs. vector distinctions, physical units, dimensional consistency, coordinate independence of physical quantities.
+- Chapter 1: Foundational Motivation, Terminology & Core Concepts
+  * Clear, intuitive definitions of foundational concepts, motivation ("Why this matters"), historical/theoretical context, and core definitions.
 - Chapter 2: Theoretical Architecture & Structural Formulations
-  * EVERY mathematical equation and transformation shown on the slides MUST be rigorously included in LaTeX.
-  * Formal taxonomy: Cartesian coordinates (2D and 3D), Polar coordinates (r, theta), Cylindrical, Spherical coordinate systems.
-  * Rigorous transformation equations (Cartesian <-> Polar: x = r cos(theta), y = r sin(theta), r = sqrt(x^2 + y^2), theta = arctan2(y, x)).
-  * Coordinate frames: Inertial reference frames vs. Body-fixed reference frames, origin placement, right-hand convention.
-- Chapter 3: Mathematical Formalism & Detailed Derivations
-  * Vector algebra: Geometric triangle and parallelogram laws vs. analytical component-wise addition: a + b = <a1+b1, a2+b2>.
-  * Scalar multiplication and its algebraic properties.
-  * Euclidean norms and distances: ||v|| = sqrt(sum v_i^2), generalized Pythagorean theorem in R^n.
-  * Unit vector normalization: u = v / ||v||, direction cosines cos(alpha), cos(beta), cos(gamma), and the identity cos^2(alpha) + cos^2(beta) + cos^2(gamma) = 1.
-- Chapter 4: Exhaustive Deep-Dive on Touched-Upon Concepts & Advanced Theory
-  * MANDATORY: Provide a complete, graduate-level treatment of all topics glossed over or briefly touched upon:
-    - 3D Cartesian coordinates and orthonormal unit basis vectors (i, j, k).
-    - Rigid body dynamics: definition of a rigid body as a system of particles where distance ||r_i - r_j|| = constant for all time.
-    - Reference frame kinematics: relation between inertial frame and body frame via rotation matrices R in SO(3).
-    - Dot product: algebraic definition sum(a_i*b_i) and geometric definition ||a||||b||cos(theta), Cauchy-Schwarz inequality, scalar and vector projections.
-    - Cross product: determinant expansion, right-hand rule, geometric area of parallelogram, anti-commutativity, cross product matrix operator [v]x.
-    - Vector triple products: BAC-CAB rule: a x (b x c) = (a . c)b - (a . b)c.
-- Chapter 5: Practical Engineering Applications & Step-by-Step Solved Problem Sets
-  * Real-world aerospace/robotics/engineering applications (e.g. UAV flight control, wind velocity integration, sensor frames).
-  * At least 2 FULLY WORKED NUMERICAL & ALGEBRAIC EXEMPLAR PROBLEMS showing step-by-step problem statements, variable assignments, substitution, intermediate algebraic steps, and final answers with units.
-- Chapter 6: Chapter Summary, Master Formula Reference Sheet & Self-Assessment
-  * EXHAUSTIVE reference table compiling EVERY formula mentioned in the lecture and slides.
-  * High-yield conceptual review questions with complete model answers.
+  * Detail every core principle, structural rule, governing equation, algorithm, or model presented in the lecture and slides.
+  * Rigorous taxonomy, definitions, and relationships between components.
+- Chapter 3: Analytical Formalism, Mechanisms & In-Depth Derivations
+  * Step-by-step breakdown of how the mechanisms work.
+  * All mathematical relations, code logic, or theoretical derivations formatted in rigorous detail.
+- Chapter 4: Advanced Deep-Dive on Complex Concepts & Nuances
+  * Thorough graduate-level treatment of advanced topics touched upon in the lecture.
+  * Nuances, edge cases, underlying assumptions, and structural trade-offs.
+- Chapter 5: Practical Applications, Solved Problem Sets & Case Studies
+  * Real-world industry/research applications of the material.
+  * At least 2 FULLY WORKED STEP-BY-STEP EXEMPLAR PROBLEMS or concrete case studies showing problem formulation, step-by-step solution, intermediate reasoning, and conclusions.
+- Chapter 6: Master Reference Sheet, Key Takeaways & Self-Assessment
+  * Comprehensive summary reference of every key rule, equation, and concept.
+  * High-yield review questions with complete, clear model answers.
 
 MATHEMATICAL FORMULAS (LATEX):
 - Every single equation MUST be formatted in valid LaTeX enclosed in $$ ... $$ for display math or $ ... $ for inline math.

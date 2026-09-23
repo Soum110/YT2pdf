@@ -614,6 +614,9 @@ def _clean_text_for_pdf(text: str) -> str:
     """Safely converts arbitrary unicode text to Latin-1 compatible string without crashing."""
     if not text:
         return ""
+    import re
+    # Remove emojis and non-BMP symbols (surrogates) that crash FPDF fonts
+    text = re.sub(r'[\U00010000-\U0010ffff]', '', str(text))
     replacements = {
         "—": "--",
         "–": "-",
@@ -656,6 +659,11 @@ def _clean_text_for_pdf(text: str) -> str:
         "\u00A0": " ",
         "\u200B": "",
         "\u202F": " ",
+        "✦": "*",
+        "💡": "",
+        "📐": "",
+        "🔬": "",
+        "📷": "",
     }
     for old, new in replacements.items():
         text = text.replace(old, new)
@@ -712,8 +720,8 @@ def build_study_guide_pdf(
             str(html_path.resolve()),
         ]
         try:
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20)
-            if output_path.exists() and output_path.stat().st_size > 5000:
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=25)
+            if output_path.exists() and output_path.stat().st_size > 500:
                 log.info("Study guide PDF compiled successfully via Chrome! (%d bytes)", output_path.stat().st_size)
                 return output_path
             else:
@@ -756,7 +764,9 @@ def build_study_guide_pdf(
         def safe_txt(t: str) -> str:
             if not t:
                 return ""
-            return t if use_unicode_font else _clean_text_for_pdf(t)
+            import re
+            cleaned = re.sub(r'[\U00010000-\U0010ffff]', '', str(t))
+            return cleaned if use_unicode_font else _clean_text_for_pdf(cleaned)
 
         def safe_cell(text: str, h: float = 6, ln: bool = True, align: str = "L"):
             pdf.set_x(pdf.l_margin)
@@ -895,18 +905,77 @@ def build_study_guide_pdf(
         return output_path
 
     except Exception as fallback_err:
-        log.exception("Detailed fallback failed (%s). Writing emergency basic PDF.", fallback_err)
+        log.exception("Detailed fallback failed (%s). Writing resilient chapter PDF.", fallback_err)
         try:
             from fpdf import FPDF
-            emergency_pdf = FPDF()
+            emergency_pdf = FPDF(orientation="P", unit="mm", format="A4")
+            emergency_pdf.set_auto_page_break(auto=True, margin=15)
             emergency_pdf.add_page()
-            emergency_pdf.set_font("Helvetica", "B", 14)
-            emergency_pdf.set_x(emergency_pdf.l_margin)
-            emergency_pdf.cell(0, 10, "Study Guide - " + _clean_text_for_pdf(video_title)[:40], ln=True)
-            emergency_pdf.set_font("Helvetica", "", 10)
-            emergency_pdf.set_x(emergency_pdf.l_margin)
-            emergency_pdf.multi_cell(0, 6, "Study guide notes successfully compiled from video slides.")
+            emergency_pdf.set_font("Helvetica", "B", 16)
+            title = getattr(study_guide, "video_title", video_title) or video_title
+            emergency_pdf.multi_cell(0, 8, _clean_text_for_pdf(title))
+            emergency_pdf.ln(3)
+
+            summary = getattr(study_guide, "lecture_summary", "")
+            if summary:
+                emergency_pdf.set_font("Helvetica", "B", 12)
+                emergency_pdf.cell(0, 8, "Executive Lecture Summary", ln=True)
+                emergency_pdf.set_font("Helvetica", "", 10)
+                emergency_pdf.multi_cell(0, 5, _clean_text_for_pdf(summary))
+                emergency_pdf.ln(4)
+
+            chapters = getattr(study_guide, "chapters", [])
+            for ch in chapters:
+                emergency_pdf.set_font("Helvetica", "B", 13)
+                c_num = getattr(ch, "chapter_num", 1)
+                c_title = _clean_text_for_pdf(getattr(ch, "title", "Chapter"))
+                emergency_pdf.cell(0, 8, f"Chapter {c_num:02d}: {c_title}", ln=True)
+
+                c_sub = _clean_text_for_pdf(getattr(ch, "subtitle", ""))
+                if c_sub:
+                    emergency_pdf.set_font("Helvetica", "I", 10)
+                    emergency_pdf.cell(0, 5, c_sub, ln=True)
+
+                emergency_pdf.set_font("Helvetica", "", 10)
+                intro = getattr(ch, "introduction", "")
+                if intro:
+                    emergency_pdf.multi_cell(0, 5, _clean_text_for_pdf(intro))
+                    emergency_pdf.ln(2)
+
+                for p in getattr(ch, "content_paragraphs", []):
+                    if p and p.strip():
+                        emergency_pdf.multi_cell(0, 5, _clean_text_for_pdf(p.strip()))
+                        emergency_pdf.ln(2)
+
+                formulas = getattr(ch, "latex_formulas", [])
+                if formulas:
+                    emergency_pdf.set_font("Helvetica", "B", 9)
+                    emergency_pdf.cell(0, 5, "Key Formulations & Rules:", ln=True)
+                    emergency_pdf.set_font("Helvetica", "", 9)
+                    for item in formulas:
+                        if isinstance(item, dict):
+                            f_eq = _clean_text_for_pdf(str(item.get("formula", "")).strip())
+                            f_desc = _clean_text_for_pdf(str(item.get("description", "")).strip())
+                        elif isinstance(item, str):
+                            f_eq = _clean_text_for_pdf(item.strip())
+                            f_desc = ""
+                        else:
+                            continue
+                        if f_eq:
+                            emergency_pdf.multi_cell(0, 4, f"  * {f_eq} - {f_desc}" if f_desc else f"  * {f_eq}")
+                    emergency_pdf.ln(2)
+
+                takeaways = getattr(ch, "key_takeaways", [])
+                if takeaways:
+                    emergency_pdf.set_font("Helvetica", "B", 9)
+                    emergency_pdf.cell(0, 5, "Key Takeaways:", ln=True)
+                    emergency_pdf.set_font("Helvetica", "", 9)
+                    for t in takeaways:
+                        emergency_pdf.multi_cell(0, 4, f"  - {_clean_text_for_pdf(str(t))}")
+                    emergency_pdf.ln(3)
+
             emergency_pdf.output(str(output_path))
+            log.info("Wrote full chapter PDF via resilient fallback (%d bytes)", output_path.stat().st_size)
             return output_path
         except Exception as emer_err:
             log.exception("Emergency PDF write failed: %s", emer_err)
