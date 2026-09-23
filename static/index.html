@@ -3049,7 +3049,75 @@
       });
     }
 
-    // URL pasted directly on website: Process 100% in cloud background with zero browser tabs
+    // 1. Seamless Silent Extraction via Companion Extension (0 tabs, 0 windows)
+    if (isCompanionActive) {
+      document.getElementById("btn-text").textContent = "Processing...";
+      showProgress();
+      updateProgress({
+        stage: "companion_init",
+        progress: 8,
+        message: "Starting silent slide extraction in background..."
+      });
+
+      const companionResult = await new Promise((resolve) => {
+        let settled = false;
+        const cleanupListeners = () => {
+          window.removeEventListener("YT2PDF_EXTRACTION_PROGRESS", onProg);
+          window.removeEventListener("YT2PDF_EXTRACTION_RESULT", onRes);
+        };
+
+        const onProg = (e) => {
+          const cur = e.detail?.current || 1;
+          const tot = e.detail?.total || 1;
+          const pct = Math.min(65, 10 + Math.floor((cur / tot) * 52));
+          updateProgress({
+            stage: "companion_capturing",
+            progress: pct,
+            message: `Extracting slides: frame ${cur} of ${tot}...`
+          });
+        };
+
+        const onRes = (e) => {
+          if (!settled) {
+            settled = true;
+            cleanupListeners();
+            resolve(e.detail);
+          }
+        };
+
+        window.addEventListener("YT2PDF_EXTRACTION_PROGRESS", onProg);
+        window.addEventListener("YT2PDF_EXTRACTION_RESULT", onRes);
+
+        // Dispatch extraction trigger to web_bridge
+        window.dispatchEvent(new CustomEvent("YT2PDF_START_EXTRACTION", {
+          detail: { video_url: url }
+        }));
+      });
+
+      if (companionResult && companionResult.success && companionResult.job_id) {
+        jobId = companionResult.job_id;
+        localStorage.setItem("yt2pdf_last_job", jobId);
+        const banner = document.getElementById("recent-job-banner");
+        if (banner) banner.style.display = "none";
+
+        updateProgress({
+          stage: "companion_received",
+          progress: 68,
+          message: `Received ${companionResult.slide_count || ""} slides. Generating PDFs...`
+        });
+
+        pollErrorCount = 0;
+        pollTimer = setInterval(pollStatus, 2000);
+        return;
+      } else {
+        const errMsg = companionResult?.error || "Background slide extraction failed.";
+        console.warn("Companion extraction failed:", errMsg);
+        showError(errMsg);
+        return;
+      }
+    }
+
+    // 2. Fallback: Standard Server Processing (if companion is not installed)
     document.getElementById("btn-text").textContent = "Processing...";
     showProgress();
     updateProgress({
@@ -3058,8 +3126,6 @@
       message: "Fetching video info..."
     });
 
-    // Default or Fallback: Standard Server Processing
-    document.getElementById("btn-text").textContent = "Processing...";
     try {
       const res = await apiFetch("/api/process", {
         method: "POST",

@@ -459,7 +459,7 @@
       video = document.querySelector("video.html5-main-video, video");
       dismissOverlaysAndSkipAds(video);
 
-      // Check for YouTube fatal error (e.g. video private/deleted)
+      // Check for YouTube fatal error (e.g. video private/deleted/embedding disabled)
       const errorScreen = document.querySelector(".ytp-error");
       if (errorScreen && errorScreen.offsetParent !== null) {
         const errReason = errorScreen.querySelector(".ytp-error-content-reason")?.textContent?.trim() || "Video unavailable";
@@ -467,37 +467,36 @@
           action: "headless_extraction_failed",
           error: `YouTube error: ${errReason}`
         });
+        if (window.parent && window.parent !== window) {
+          try {
+            window.parent.postMessage({
+              type: "YT2PDF_HEADLESS_ERROR",
+              error: `YouTube error: ${errReason}`
+            }, "*");
+          } catch(e) {}
+        }
         return;
       }
 
-      // 1. og:video:duration (exact integer seconds)
+      // 0. Explicit duration passed via URL parameters
       if (!resolvedDuration) {
-        const ogDur = document.querySelector('meta[property="og:video:duration"]')?.getAttribute("content");
-        if (ogDur && !isNaN(parseInt(ogDur, 10)) && parseInt(ogDur, 10) > 0) {
-          resolvedDuration = parseInt(ogDur, 10);
+        const pDur = new URLSearchParams(window.location.search).get("yt2pdf_duration");
+        if (pDur && !isNaN(parseInt(pDur, 10)) && parseInt(pDur, 10) > 0) {
+          resolvedDuration = parseInt(pDur, 10);
         }
       }
 
-      // 2. meta itemprop="duration" (ISO 8601 string)
-      if (!resolvedDuration) {
-        const metaDur = document.querySelector('meta[itemprop="duration"]')?.getAttribute("content");
-        if (metaDur) resolvedDuration = parseISO8601(metaDur);
-      }
-
-      // 3. HTML script tags with lengthSeconds
-      if (!resolvedDuration) {
-        for (const s of document.querySelectorAll("script")) {
-          if (s.textContent && s.textContent.includes("lengthSeconds")) {
-            const m = s.textContent.match(/["']lengthSeconds["']\s*:\s*["']?(\d+)["']?/);
-            if (m && m[1]) {
-              const sec = parseInt(m[1], 10);
-              if (sec > 0) { resolvedDuration = sec; break; }
-            }
-          }
+      // 1. Video element duration & kickstart muted playback
+      if (video) {
+        video.muted = true;
+        video.volume = 0;
+        video.play().catch(() => {});
+        if (!resolvedDuration && video.duration && !isNaN(video.duration) && video.duration > 0) {
+          resolvedDuration = Math.floor(video.duration);
         }
       }
 
-      // 4. Player UI time duration (.ytp-time-duration e.g. "12:34")
+      // 2. Player UI time duration (.ytp-time-duration e.g. "12:34")
       if (!resolvedDuration) {
         const timeDur = document.querySelector(".ytp-time-duration")?.textContent?.trim();
         if (timeDur && timeDur.includes(":")) {
@@ -510,12 +509,39 @@
         }
       }
 
-      // 5. Video element duration & kickstart muted playback
-      if (video) {
-        video.muted = true;
-        video.play().catch(() => {});
-        if (!resolvedDuration && video.duration && !isNaN(video.duration) && video.duration > 0) {
-          resolvedDuration = Math.floor(video.duration);
+      // 3. Progress bar aria-valuemax
+      if (!resolvedDuration) {
+        const pBar = document.querySelector(".ytp-progress-bar");
+        if (pBar) {
+          const maxVal = parseFloat(pBar.getAttribute("aria-valuemax") || "0");
+          if (maxVal > 0) resolvedDuration = Math.floor(maxVal);
+        }
+      }
+
+      // 4. og:video:duration (exact integer seconds)
+      if (!resolvedDuration) {
+        const ogDur = document.querySelector('meta[property="og:video:duration"]')?.getAttribute("content");
+        if (ogDur && !isNaN(parseInt(ogDur, 10)) && parseInt(ogDur, 10) > 0) {
+          resolvedDuration = parseInt(ogDur, 10);
+        }
+      }
+
+      // 5. meta itemprop="duration" (ISO 8601 string)
+      if (!resolvedDuration) {
+        const metaDur = document.querySelector('meta[itemprop="duration"]')?.getAttribute("content");
+        if (metaDur) resolvedDuration = parseISO8601(metaDur);
+      }
+
+      // 6. HTML script tags with lengthSeconds
+      if (!resolvedDuration) {
+        for (const s of document.querySelectorAll("script")) {
+          if (s.textContent && s.textContent.includes("lengthSeconds")) {
+            const m = s.textContent.match(/["']lengthSeconds["']\s*:\s*["']?(\d+)["']?/);
+            if (m && m[1]) {
+              const sec = parseInt(m[1], 10);
+              if (sec > 0) { resolvedDuration = sec; break; }
+            }
+          }
         }
       }
 
@@ -531,6 +557,14 @@
         action: "headless_extraction_failed",
         error: "Unable to load YouTube video stream in silent background tab."
       });
+      if (window.parent && window.parent !== window) {
+        try {
+          window.parent.postMessage({
+            type: "YT2PDF_HEADLESS_ERROR",
+            error: "Unable to load YouTube video stream in background."
+          }, "*");
+        } catch(e) {}
+      }
       return;
     }
 
@@ -554,9 +588,25 @@
       const titleEl = document.querySelector("h1.ytd-watch-metadata yt-formatted-string") ||
                       document.querySelector("h1.title yt-formatted-string") ||
                       document.querySelector("h1.title") ||
+                      document.querySelector(".ytp-title-link") ||
+                      document.querySelector(".ytp-title") ||
                       document.querySelector('meta[name="title"]');
-      const videoTitle = titleEl ? (titleEl.innerText || titleEl.getAttribute("content") || "").trim() : document.title.replace(" - YouTube", "").trim();
-      const cleanUrl = window.location.href.replace(/([&?])yt2pdf_headless=1&?/, "$1").replace(/[?&]$/, "");
+      let videoTitle = titleEl ? (titleEl.innerText || titleEl.getAttribute("content") || "").trim() : document.title.replace(" - YouTube", "").trim();
+      if (!videoTitle) {
+        const urlTitle = new URLSearchParams(window.location.search).get("yt2pdf_title");
+        if (urlTitle) videoTitle = decodeURIComponent(urlTitle);
+      }
+      if (!videoTitle) videoTitle = "Presentation Slides";
+
+      let cleanUrl = window.location.href;
+      if (window.location.pathname.includes("/embed/")) {
+        const vid = window.location.pathname.split("/embed/")[1]?.split("?")[0];
+        if (vid) {
+          cleanUrl = `https://www.youtube.com/watch?v=${vid}`;
+        }
+      } else {
+        cleanUrl = cleanUrl.replace(/([&?])yt2pdf_headless=1&?/, "$1").replace(/[?&]$/, "");
+      }
 
       let step = 15;
       if (duration > 3600) step = 60;

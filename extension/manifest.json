@@ -29,6 +29,7 @@
   },
   "host_permissions": [
     "*://*.youtube.com/*",
+    "*://*.youtube-nocookie.com/*",
     "*://yt2pdfs.com/*",
     "*://www.yt2pdfs.com/*",
     "https://*.run.app/*",
@@ -38,7 +39,9 @@
   "content_scripts": [
     {
       "matches": [
-        "*://*.youtube.com/watch*"
+        "*://*.youtube.com/watch*",
+        "*://*.youtube.com/embed/*",
+        "*://*.youtube-nocookie.com/embed/*"
       ],
       "js": [
         "content.js"

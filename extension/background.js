@@ -19,7 +19,7 @@ async function setupDNRRules() {
   try {
     if (chrome.declarativeNetRequest && chrome.declarativeNetRequest.updateDynamicRules) {
       await chrome.declarativeNetRequest.updateDynamicRules({
-        removeRuleIds: [DNR_RULE_ID],
+        removeRuleIds: [DNR_RULE_ID, 2002],
         addRules: [
           {
             id: DNR_RULE_ID,
@@ -34,6 +34,22 @@ async function setupDNRRules() {
             },
             condition: {
               urlFilter: "*://*.youtube.com/*",
+              resourceTypes: ["sub_frame"]
+            }
+          },
+          {
+            id: 2002,
+            priority: 1,
+            action: {
+              type: "modifyHeaders",
+              responseHeaders: [
+                { header: "x-frame-options", operation: "remove" },
+                { header: "content-security-policy", operation: "remove" },
+                { header: "frame-options", operation: "remove" }
+              ]
+            },
+            condition: {
+              urlFilter: "*://*.youtube-nocookie.com/*",
               resourceTypes: ["sub_frame"]
             }
           }
