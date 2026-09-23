@@ -160,15 +160,26 @@ def frames_at_fps(video_path: str, target_fps: int = 1):
     )
 
     frame_index = 0
+    consecutive_fails = 0
+    max_consecutive_fails = 12  # Tolerate corrupted/unseekable keyframes before giving up
+
     try:
         while True:
             cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
             ret, frame = cap.read()
-            if not ret:
-                break
+            if not ret or frame is None:
+                consecutive_fails += 1
+                if consecutive_fails >= max_consecutive_fails:
+                    break
+                frame_index += hop
+                continue
+
+            consecutive_fails = 0
             timestamp = frame_index / native_fps
             yield frame, timestamp, frame_index
             frame_index += hop
+            if total_frames > 0 and frame_index > (total_frames + hop * 2):
+                break
     finally:
         cap.release()
 
@@ -253,16 +264,49 @@ def pass1_find_candidates(
             log.debug("  [%5.1fs] SSIM=%.3f diff=%.3f skip (debounce=%s)", ts, score, diff_score, in_debounce)
 
     duration_sec = total_frames / native_fps if native_fps > 0 else 0
-    # Safety Net: If a video > 60s yielded fewer than 6 candidates,
-    # sample regular checkpoints so subtle lecture slides are NEVER missed!
-    if len(candidates) < 6 and duration_sec > 60:
-        log.info("Pass 1 detected only %d candidates for %.1fs video. Sampling uniform checkpoints...",
-                 len(candidates), duration_sec)
-        step_sec = max(25.0, duration_sec / 18.0)
-        target_ts_list = np.arange(8.0, duration_sec - 5.0, step_sec)
+
+    # Ensure full-duration coverage and gap filling:
+    # 1. If overall candidates are few (< 6 for > 60s)
+    # 2. Or if ANY gap between consecutive candidates exceeds 90s
+    # 3. Or if the last candidate is > 35s before the end of the lecture (e.g. truncated at 25:22 on a 32:05 video)
+    gaps_to_fill = []
+    if candidates and duration_sec > 60:
+        # Check start gap
+        if candidates[0].timestamp_sec > 45.0:
+            gaps_to_fill.append((8.0, candidates[0].timestamp_sec))
+        # Check intermediate gaps
+        for i in range(len(candidates) - 1):
+            t_curr = candidates[i].timestamp_sec
+            t_next = candidates[i + 1].timestamp_sec
+            if (t_next - t_curr) > 90.0:
+                gaps_to_fill.append((t_curr + 30.0, t_next - 15.0))
+        # Check end-of-lecture gap (critical for lectures where slides stopped prematurely)
+        last_cand_ts = candidates[-1].timestamp_sec
+        if last_cand_ts < (duration_sec - 35.0):
+            log.info("Detected end-of-lecture gap: last slide at %.1fs but video is %.1fs (gap of %.1fs)",
+                     last_cand_ts, duration_sec, duration_sec - last_cand_ts)
+            gaps_to_fill.append((last_cand_ts + 25.0, duration_sec - 8.0))
+    elif not candidates and duration_sec > 10:
+        gaps_to_fill.append((4.0, max(5.0, duration_sec - 5.0)))
+
+    if gaps_to_fill or (len(candidates) < 6 and duration_sec > 60):
+        log.info("Scanning %d timeline gaps for missing slides across lecture...", len(gaps_to_fill))
         existing_ts = {int(c.timestamp_sec) for c in candidates}
         cap_chk = cv2.VideoCapture(video_path)
-        for ts_target in target_ts_list:
+        
+        target_checkpoints = []
+        for g_start, g_end in gaps_to_fill:
+            step = 30.0 if (g_end - g_start) > 90 else 20.0
+            cur = g_start
+            while cur <= g_end:
+                target_checkpoints.append(cur)
+                cur += step
+
+        # If sparse overall, also add uniform distribution
+        if len(candidates) < 6 and duration_sec > 60:
+            target_checkpoints.extend(list(np.arange(10.0, duration_sec - 5.0, max(25.0, duration_sec / 18.0))))
+
+        for ts_target in target_checkpoints:
             if any(abs(ts_target - et) < 14.0 for et in existing_ts):
                 continue
             f_idx = int(ts_target * native_fps)
@@ -275,7 +319,7 @@ def pass1_find_candidates(
                 existing_ts.add(int(ts_target))
         cap_chk.release()
         candidates.sort(key=lambda c: c.timestamp_sec)
-        log.info("Total candidates after uniform checkpoint coverage: %d", len(candidates))
+        log.info("Total candidates after full lecture gap-filling: %d", len(candidates))
 
     log.info("Pass 1 complete: %d candidate frames found (streamed to disk, RAM < 80MB)", len(candidates))
     return candidates

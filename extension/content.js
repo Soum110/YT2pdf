@@ -62,22 +62,54 @@
   }
 
   // ─────────────────────────────────────────────
-  // Perceptual frame difference (luminance diff)
+  // Perceptual frame difference (luminance diff + quadrant peak diff)
   // ─────────────────────────────────────────────
   function calculateDifference(canvasA, canvasB) {
+    const w = canvasA.width || 64;
+    const h = canvasA.height || 36;
     const ctxA = canvasA.getContext("2d");
     const ctxB = canvasB.getContext("2d");
-    const dataA = ctxA.getImageData(0, 0, 32, 18).data;
-    const dataB = ctxB.getImageData(0, 0, 32, 18).data;
+    const dataA = ctxA.getImageData(0, 0, w, h).data;
+    const dataB = ctxB.getImageData(0, 0, w, h).data;
 
-    let diff = 0;
-    const total = 32 * 18 * 4;
-    for (let i = 0; i < total; i += 4) {
+    let totalDiff = 0;
+    const numPixels = w * h;
+    const totalBytes = numPixels * 4;
+
+    // Track 4 quadrants to detect localized additions (bullet points, math formulas, diagrams)
+    const midX = Math.floor(w / 2);
+    const midY = Math.floor(h / 2);
+    let qDiff = [0, 0, 0, 0];
+    let qPixels = [0, 0, 0, 0];
+
+    for (let i = 0; i < totalBytes; i += 4) {
+      const pIdx = i / 4;
+      const px = pIdx % w;
+      const py = Math.floor(pIdx / w);
+      const qIdx = (px >= midX ? 1 : 0) + (py >= midY ? 2 : 0);
+
       const lumA = 0.299 * dataA[i] + 0.587 * dataA[i + 1] + 0.114 * dataA[i + 2];
       const lumB = 0.299 * dataB[i] + 0.587 * dataB[i + 1] + 0.114 * dataB[i + 2];
-      diff += Math.abs(lumA - lumB);
+      const d = Math.abs(lumA - lumB);
+      totalDiff += d;
+      qDiff[qIdx] += d;
+      qPixels[qIdx]++;
     }
-    return diff / (32 * 18 * 255);
+
+    const meanDiff = totalDiff / (numPixels * 255);
+    const maxQuadrantDiff = Math.max(
+      qDiff[0] / ((qPixels[0] || 1) * 255),
+      qDiff[1] / ((qPixels[1] || 1) * 255),
+      qDiff[2] / ((qPixels[2] || 1) * 255),
+      qDiff[3] / ((qPixels[3] || 1) * 255)
+    );
+
+    // Either overall slide layout changed OR a significant section/bullet/equation was added
+    return {
+      meanDiff,
+      maxQuadrantDiff,
+      isDistinct: meanDiff >= 0.012 || maxQuadrantDiff >= 0.030
+    };
   }
 
   // ─────────────────────────────────────────────
@@ -608,36 +640,38 @@
         cleanUrl = cleanUrl.replace(/([&?])yt2pdf_headless=1&?/, "$1").replace(/[?&]$/, "");
       }
 
-      let step = 15;
-      if (duration > 3600) step = 60;
-      else if (duration > 1800) step = 40;
-      else if (duration > 600) step = 25;
-      else step = 12;
+      let step = 8;
+      if (duration > 3600) step = 14;      // > 1 hr
+      else if (duration > 1800) step = 10; // 30-60 mins (every 10s: ~190 checks for 32m)
+      else if (duration > 600) step = 8;   // 10-30 mins
+      else step = 5;                       // < 10 mins
 
       const samplePoints = [];
-      for (let t = 2; t < duration - 2; t += step) {
+      const startT = Math.max(2, Math.floor(duration * 0.005));
+      for (let t = startT; t < duration - 2; t += step) {
         samplePoints.push(t);
       }
-      const maxFrames = 35;
-      const finalPoints = samplePoints.length > maxFrames
-        ? samplePoints.filter((_, idx) => idx % Math.ceil(samplePoints.length / maxFrames) === 0)
-        : samplePoints;
+      // Always guarantee sampling the concluding minute of the lecture!
+      if (duration > 20 && (!samplePoints.length || samplePoints[samplePoints.length - 1] < duration - 15)) {
+        samplePoints.push(Math.max(2, duration - 10));
+      }
+      const finalPoints = samplePoints; // Full lecture coverage without decimation!
 
       const captureCanvas = document.createElement("canvas");
       captureCanvas.width = 1280;
       captureCanvas.height = 720;
       const captureCtx = captureCanvas.getContext("2d");
 
-      // Candidate thumbnail canvas
+      // Candidate thumbnail canvas (64x36 for crisp detail detection)
       const thumbCanvas = document.createElement("canvas");
-      thumbCanvas.width = 32;
-      thumbCanvas.height = 18;
+      thumbCanvas.width = 64;
+      thumbCanvas.height = 36;
       const thumbCtx = thumbCanvas.getContext("2d");
 
       // Dedicated last-captured thumbnail canvas
       const lastCapturedCanvas = document.createElement("canvas");
-      lastCapturedCanvas.width = 32;
-      lastCapturedCanvas.height = 18;
+      lastCapturedCanvas.width = 64;
+      lastCapturedCanvas.height = 36;
       const lastCapturedCtx = lastCapturedCanvas.getContext("2d");
 
       const capturedSlides = [];
@@ -675,21 +709,20 @@
         ]);
         await unthrottledSleep(60);
 
-        thumbCtx.drawImage(video, 0, 0, 32, 18);
+        thumbCtx.drawImage(video, 0, 0, 64, 36);
 
         let isDistinct = false;
         if (capturedSlides.length === 0) {
           isDistinct = true;
         } else {
-          const diff = calculateDifference(thumbCanvas, lastCapturedCanvas);
-          // 0.018 captures text, formula, and diagram changes even on identical slide templates
-          if (diff >= 0.018) {
+          const diffResult = calculateDifference(thumbCanvas, lastCapturedCanvas);
+          if (diffResult.isDistinct) {
             isDistinct = true;
           }
         }
 
         if (isDistinct) {
-          lastCapturedCtx.drawImage(thumbCanvas, 0, 0, 32, 18);
+          lastCapturedCtx.drawImage(thumbCanvas, 0, 0, 64, 36);
           captureCtx.drawImage(video, 0, 0, 1280, 720);
           capturedSlides.push({
             timestamp: timeTarget,
@@ -699,15 +732,30 @@
         }
       }
 
-      // Safety Net: If subtle transitions yielded fewer than 5 slides on a video > 60s,
-      // extract uniform checkpoints across the lecture so NO slides are skipped!
-      if (capturedSlides.length < 5 && duration > 60 && finalPoints.length >= 6) {
-        console.log(`[YT2PDF Companion] Only ${capturedSlides.length} slides detected. Adding uniform checkpoint slides across lecture...`);
+      // Timeline Gap & End-of-Lecture Safety Net:
+      // Ensure no slides are skipped in long gaps (> 90s) or missed at the end of the video
+      const gaps = [];
+      if (capturedSlides.length > 0 && duration > 60) {
+        for (let idx = 0; idx < capturedSlides.length - 1; idx++) {
+          const tA = capturedSlides[idx].timestamp;
+          const tB = capturedSlides[idx + 1].timestamp;
+          if (tB - tA > 90) {
+            gaps.push(Math.floor((tA + tB) / 2));
+          }
+        }
+        const lastTs = capturedSlides[capturedSlides.length - 1].timestamp;
+        if (lastTs < duration - 35) {
+          console.log(`[YT2PDF Companion] End-of-lecture gap detected (last slide: ${lastTs}s, duration: ${duration}s). Sampling closing slide...`);
+          gaps.push(Math.max(2, duration - 10));
+        }
+      }
+
+      if (gaps.length > 0 || (capturedSlides.length < 6 && duration > 60)) {
+        console.log(`[YT2PDF Companion] Filling ${gaps.length} timeline gaps across lecture...`);
         const existingTs = new Set(capturedSlides.map(s => Math.floor(s.timestamp)));
-        const checkpointStep = Math.max(1, Math.floor(finalPoints.length / 10));
-        for (let idx = 0; idx < finalPoints.length; idx += checkpointStep) {
-          const tPoint = finalPoints[idx];
-          if (![...existingTs].some(ts => Math.abs(ts - tPoint) < 15)) {
+        const chkPoints = gaps.length > 0 ? gaps : finalPoints.filter((_, idx) => idx % Math.max(1, Math.floor(finalPoints.length / 12)) === 0);
+        for (const tPoint of chkPoints) {
+          if (![...existingTs].some(ts => Math.abs(ts - tPoint) < 14)) {
             try {
               video.currentTime = tPoint;
               await unthrottledSleep(180);
@@ -722,7 +770,7 @@
           }
         }
         capturedSlides.sort((a, b) => a.timestamp - b.timestamp);
-        console.log(`[YT2PDF Companion] Total slides after checkpoint coverage: ${capturedSlides.length}`);
+        console.log(`[YT2PDF Companion] Total slides after timeline gap coverage: ${capturedSlides.length}`);
       }
 
       if (capturedSlides.length === 0) {
@@ -847,23 +895,22 @@
       const videoUrl = window.location.href;
 
       // Smart sample intervals based on video duration to catch all slide changes
-      let step = 6;
-      if (duration > 3600) step = 35;       // > 1 hr
-      else if (duration > 1800) step = 20;  // 30-60 mins
-      else if (duration > 600) step = 12;   // 10-30 mins
-      else step = 6;                        // < 10 mins
+      let step = 8;
+      if (duration > 3600) step = 14;      // > 1 hr
+      else if (duration > 1800) step = 10; // 30-60 mins (every 10s checks for 32m)
+      else if (duration > 600) step = 8;   // 10-30 mins
+      else step = 5;                       // < 10 mins
 
       const samplePoints = [];
-      const startT = Math.max(2, Math.floor(duration * 0.01));
+      const startT = Math.max(2, Math.floor(duration * 0.005));
       for (let t = startT; t < duration - 2; t += step) {
         samplePoints.push(t);
       }
-
-      // Max 35 frames to capture all slides while keeping payload optimal (~1.5MB)
-      const maxFrames = 35;
-      const finalPoints = samplePoints.length > maxFrames
-        ? samplePoints.filter((_, idx) => idx % Math.ceil(samplePoints.length / maxFrames) === 0)
-        : samplePoints;
+      // Always guarantee sampling the concluding minute of the lecture!
+      if (duration > 20 && (!samplePoints.length || samplePoints[samplePoints.length - 1] < duration - 15)) {
+        samplePoints.push(Math.max(2, duration - 10));
+      }
+      const finalPoints = samplePoints; // Full lecture coverage without decimation!
 
       // Canvases
       const captureCanvas = document.createElement("canvas");
@@ -871,16 +918,16 @@
       captureCanvas.height = 720;
       const captureCtx = captureCanvas.getContext("2d");
 
-      // Candidate thumbnail canvas
+      // Candidate thumbnail canvas (64x36 for crisp detail detection)
       const thumbCanvas = document.createElement("canvas");
-      thumbCanvas.width = 32;
-      thumbCanvas.height = 18;
+      thumbCanvas.width = 64;
+      thumbCanvas.height = 36;
       const thumbCtx = thumbCanvas.getContext("2d");
 
       // Dedicated last-captured thumbnail canvas (eliminates alternating parity bugs)
       const lastCapturedCanvas = document.createElement("canvas");
-      lastCapturedCanvas.width = 32;
-      lastCapturedCanvas.height = 18;
+      lastCapturedCanvas.width = 64;
+      lastCapturedCanvas.height = 36;
       const lastCapturedCtx = lastCapturedCanvas.getContext("2d");
 
       const capturedSlides = [];
@@ -915,20 +962,20 @@
           <span>${pct}% (${capturedSlides.length})</span>
         `;
 
-        thumbCtx.drawImage(video, 0, 0, 32, 18);
+        thumbCtx.drawImage(video, 0, 0, 64, 36);
 
         let isDistinct = false;
         if (capturedSlides.length === 0) {
           isDistinct = true;
         } else {
-          const diff = calculateDifference(thumbCanvas, lastCapturedCanvas);
-          if (diff >= 0.018) {
+          const diffResult = calculateDifference(thumbCanvas, lastCapturedCanvas);
+          if (diffResult.isDistinct) {
             isDistinct = true;
           }
         }
 
         if (isDistinct) {
-          lastCapturedCtx.drawImage(thumbCanvas, 0, 0, 32, 18);
+          lastCapturedCtx.drawImage(thumbCanvas, 0, 0, 64, 36);
           captureCtx.drawImage(video, 0, 0, 1280, 720);
           const base64Data = captureCanvas.toDataURL("image/jpeg", 0.78);
 
@@ -940,15 +987,30 @@
         }
       }
 
-      // Safety Net: If subtle transitions yielded fewer than 5 slides on a video > 60s,
-      // extract uniform checkpoints across the lecture so NO slides are skipped!
-      if (capturedSlides.length < 5 && duration > 60 && finalPoints.length >= 6) {
-        console.log(`[YT2PDF Companion] Only ${capturedSlides.length} slides detected. Adding uniform checkpoint slides across lecture...`);
+      // Timeline Gap & End-of-Lecture Safety Net:
+      // Ensure no slides are skipped in long gaps (> 90s) or missed at the end of the video
+      const gaps = [];
+      if (capturedSlides.length > 0 && duration > 60) {
+        for (let idx = 0; idx < capturedSlides.length - 1; idx++) {
+          const tA = capturedSlides[idx].timestamp;
+          const tB = capturedSlides[idx + 1].timestamp;
+          if (tB - tA > 90) {
+            gaps.push(Math.floor((tA + tB) / 2));
+          }
+        }
+        const lastTs = capturedSlides[capturedSlides.length - 1].timestamp;
+        if (lastTs < duration - 35) {
+          console.log(`[YT2PDF Companion] End-of-lecture gap detected (last slide: ${lastTs}s, duration: ${duration}s). Sampling closing slide...`);
+          gaps.push(Math.max(2, duration - 10));
+        }
+      }
+
+      if (gaps.length > 0 || (capturedSlides.length < 6 && duration > 60)) {
+        console.log(`[YT2PDF Companion] Filling ${gaps.length} timeline gaps across lecture...`);
         const existingTs = new Set(capturedSlides.map(s => Math.floor(s.timestamp)));
-        const checkpointStep = Math.max(1, Math.floor(finalPoints.length / 10));
-        for (let idx = 0; idx < finalPoints.length; idx += checkpointStep) {
-          const tPoint = finalPoints[idx];
-          if (![...existingTs].some(ts => Math.abs(ts - tPoint) < 15)) {
+        const chkPoints = gaps.length > 0 ? gaps : finalPoints.filter((_, idx) => idx % Math.max(1, Math.floor(finalPoints.length / 12)) === 0);
+        for (const tPoint of chkPoints) {
+          if (![...existingTs].some(ts => Math.abs(ts - tPoint) < 14)) {
             try {
               video.currentTime = tPoint;
               await new Promise(r => setTimeout(r, 200));
@@ -963,7 +1025,7 @@
           }
         }
         capturedSlides.sort((a, b) => a.timestamp - b.timestamp);
-        console.log(`[YT2PDF Companion] Total slides after checkpoint coverage: ${capturedSlides.length}`);
+        console.log(`[YT2PDF Companion] Total slides after timeline gap coverage: ${capturedSlides.length}`);
       }
 
       if (capturedSlides.length === 0) {
@@ -995,7 +1057,8 @@
         title: videoTitle,
         duration: duration,
         frames: capturedSlides,
-        transcript: transcriptSegments
+        transcript: transcriptSegments,
+        redirect_on_success: true
       };
 
       // Upload frames: Safe multi-strategy upload (background worker with direct HTTP fallback)
@@ -1017,12 +1080,20 @@
       showToast(`🎉 ${capturedSlides.length} slides captured! Opening YT2PDFS to download your PDF...`);
 
       // Open YT2PDFS in a new tab via background service worker (immune to popup blocker suppression)
+      console.log("[YT2PDF Companion] Opening destination tab:", destinationUrl);
       safeSendRuntimeMessage({
         action: "open_website_tab",
         url: destinationUrl
       }, (res) => {
         if (!res || !res.success) {
-          try { window.open(destinationUrl, "_blank"); } catch(e) {}
+          try {
+            const w = window.open(destinationUrl, "_blank");
+            if (!w) {
+              window.location.href = destinationUrl;
+            }
+          } catch(e) {
+            window.location.href = destinationUrl;
+          }
         }
       });
 

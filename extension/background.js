@@ -257,6 +257,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             data.backend_base = base;
             sendResponse({ success: true, data: data });
 
+            // Direct Redirection Guarantee: Open the website tab immediately from service worker
+            if (message.redirect_on_success || message.payload?.redirect_on_success) {
+              let webBase = "https://yt2pdfs.com";
+              if (base.includes("localhost") || base.includes("127.0.0.1")) {
+                webBase = base;
+              }
+              const destUrl = `${webBase}/?job_id=${data.job_id}`;
+              console.log("[YT2PDF Background] Direct foreground tab creation for:", destUrl);
+              chrome.tabs.create({ url: destUrl, active: true }, () => {});
+            }
+
             if (pending) {
               cleanupExtraction(tabId, null, {
                 job_id: data.job_id,
@@ -292,9 +303,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // 6. Reliable Website Redirection (bypasses browser popup blockers)
   if (message.action === "open_website_tab" && message.url) {
     console.log("[YT2PDF Background] Opening website tab for:", message.url);
-    chrome.tabs.create({ url: message.url, active: true }, (tab) => {
-      sendResponse({ success: true, tab_id: tab?.id });
-    });
+    try {
+      chrome.tabs.create({ url: message.url, active: true }, (tab) => {
+        sendResponse({ success: true, tab_id: tab?.id });
+      });
+    } catch (tabErr) {
+      console.warn("[YT2PDF Background] Failed to open tab:", tabErr);
+      sendResponse({ success: false, error: tabErr.message });
+    }
     return true;
   }
 });
