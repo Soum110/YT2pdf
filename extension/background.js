@@ -272,4 +272,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     return true; // Keep message channel open for async response
   }
+
+  // 6. Reliable Website Redirection (bypasses browser popup blockers)
+  if (message.action === "open_website_tab" && message.url) {
+    console.log("[YT2PDF Background] Opening website tab for:", message.url);
+    chrome.tabs.create({ url: message.url, active: true }, (tab) => {
+      sendResponse({ success: true, tab_id: tab?.id });
+    });
+    return true;
+  }
 });

@@ -329,19 +329,19 @@ def _get_video_info(url: str) -> dict:
     oembed_info = _fetch_oembed(video_id) if video_id else None
 
     all_errors = []
-    # Try up to 3 best variants for info (capped to prevent stalls)
+    # Try up to 2 best variants for info (capped to prevent stalls)
     variants = _build_ydl_opts_base({"skip_download": True}, video_id=video_id)
-    for opts in variants[:3]:
+    for opts in variants[:2]:
         client = opts.get("extractor_args", {}).get("youtube", {}).get("player_client", ["default"])[0]
         logger = opts.get("logger")
+        ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         try:
             def _extract():
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     return ydl.extract_info(url, download=False)
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-                fut = ex.submit(_extract)
-                info = fut.result(timeout=7)
+            fut = ex.submit(_extract)
+            info = fut.result(timeout=5)
 
             return {
                 "title": info.get("title") or (oembed_info.get("title") if oembed_info else "Untitled Video"),
@@ -355,7 +355,11 @@ def _get_video_info(url: str) -> dict:
                 err_msg = logger.errors[-1].strip()
             all_errors.append(f"{client}: {err_msg}")
             log.warning("  yt-dlp info attempt failed (client=%s): %s", client, err_msg)
-            continue
+            # If oEmbed metadata is available, don't stall further
+            if oembed_info:
+                break
+        finally:
+            ex.shutdown(wait=False, cancel_futures=True)
 
     # If yt-dlp timed out or failed but oEmbed succeeded, use oEmbed metadata immediately
     if oembed_info:
@@ -395,14 +399,14 @@ def _download_video(url: str, output_path: str, progress_hook: Optional[Callable
 
     for opts in variants:
         client = opts.get("extractor_args", {}).get("youtube", {}).get("player_client", ["default"])[0]
+        ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         try:
             def _do_dl():
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     ydl.download([url])
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-                fut = ex.submit(_do_dl)
-                fut.result(timeout=90)  # Max 90 seconds for download
+            fut = ex.submit(_do_dl)
+            fut.result(timeout=75)  # Max 75 seconds for download
 
             candidates = list(Path(output_path).parent.glob(Path(output_path).stem + "*"))
             mp4s = [c for c in candidates if str(c).endswith(".mp4")]
@@ -417,6 +421,8 @@ def _download_video(url: str, output_path: str, progress_hook: Optional[Callable
             last_err = err_msg or e
             log.warning("  yt-dlp download attempt failed (client=%s): %s", client, err_msg)
             continue
+        finally:
+            ex.shutdown(wait=False, cancel_futures=True)
 
     is_bot_block = "bot" in str(last_err).lower() or "sign in" in str(last_err).lower() or "verify" in str(last_err).lower()
     if is_bot_block:

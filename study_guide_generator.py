@@ -178,15 +178,21 @@ def repair_and_parse_json(raw_text: str) -> dict:
 # 2. Slide Formulas & Mathematical Content Extraction
 # ─────────────────────────────────────────────
 
-def _encode_image(image_bgr: np.ndarray, max_width: int = 1000, quality: int = 85) -> str:
-    rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
-    pil = Image.fromarray(rgb)
-    if pil.width > max_width:
-        ratio = max_width / pil.width
-        pil = pil.resize((max_width, int(pil.height * ratio)), Image.LANCZOS)
-    buf = io.BytesIO()
-    pil.save(buf, format="JPEG", quality=quality)
-    return base64.b64encode(buf.getvalue()).decode("utf-8")
+def _encode_image(image_bgr: Optional[np.ndarray], max_width: int = 1000, quality: int = 85) -> str:
+    if image_bgr is None:
+        return ""
+    try:
+        rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+        pil = Image.fromarray(rgb)
+        if pil.width > max_width:
+            ratio = max_width / pil.width
+            pil = pil.resize((max_width, int(pil.height * ratio)), Image.LANCZOS)
+        buf = io.BytesIO()
+        pil.save(buf, format="JPEG", quality=quality)
+        return base64.b64encode(buf.getvalue()).decode("utf-8")
+    except Exception as enc_err:
+        log.warning("Image encoding failed: %s", enc_err)
+        return ""
 
 
 PREFERRED_STUDY_MODELS = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-flash"]
@@ -237,9 +243,17 @@ def _extract_slide_formulas(client, gemini_model: str, slides: list, batch_size:
         for idx_in_batch, slide in enumerate(batch, 1):
             abs_idx = batch_start + idx_in_batch
             mins, secs = divmod(int(slide.timestamp_sec), 60)
-            img_b64 = _encode_image(slide.image, max_width=900, quality=80)
+            img = slide.image
+            if img is None:
+                continue
+            img_b64 = _encode_image(img, max_width=900, quality=80)
+            if not img_b64:
+                continue
             parts.append(types.Part(inline_data=types.Blob(mime_type="image/jpeg", data=base64.b64decode(img_b64))))
             parts.append(types.Part(text=f"Above is Slide {abs_idx} (timestamp {mins:02d}:{secs:02d})."))
+
+        if not parts:
+            continue
 
         parts.append(types.Part(text="""For each slide above, rigorously transcribe:
 1. Exact slide title and topic headers.
@@ -335,16 +349,25 @@ Return JSON:
         if len(curated) >= max_diagrams:
             break
 
+        img = slide.image
+        if img is None:
+            continue
+
         # Check full-slide difference against previous slide (skip progressive bullet points)
-        slide_gray = cv2.cvtColor(cv2.resize(slide.image, (128, 72)), cv2.COLOR_BGR2GRAY)
-        if prev_slide_gray is not None:
-            slide_mse = float(np.mean((slide_gray.astype(float) - prev_slide_gray.astype(float)) ** 2))
-            if slide_mse < 180.0:
-                continue
-        prev_slide_gray = slide_gray
+        try:
+            slide_gray = cv2.cvtColor(cv2.resize(img, (128, 72)), cv2.COLOR_BGR2GRAY)
+            if prev_slide_gray is not None:
+                slide_mse = float(np.mean((slide_gray.astype(float) - prev_slide_gray.astype(float)) ** 2))
+                if slide_mse < 180.0:
+                    continue
+            prev_slide_gray = slide_gray
+        except Exception:
+            continue
 
         try:
-            image_b64 = _encode_image(slide.image)
+            image_b64 = _encode_image(img)
+            if not image_b64:
+                continue
             resp = _safe_generate_content(
                 client=client,
                 model=model,
@@ -702,7 +725,7 @@ Ensure that EVERY formula shown on the slides is incorporated with complete deri
                 system_instruction=SYNTHESIS_SYSTEM_PROMPT,
                 response_mime_type="application/json",
                 temperature=0.2,
-                max_output_tokens=8192,
+                max_output_tokens=4096,
             ),
         )
         data = repair_and_parse_json(resp.text)

@@ -97,8 +97,16 @@ def _build_html(study_guide, video_title: str) -> str:
         if ch.latex_formulas:
             formula_cards = []
             for item in ch.latex_formulas:
-                raw_formula = item.get("formula", "").strip()
-                desc = html.escape(item.get("description", ""))
+                if isinstance(item, dict):
+                    raw_formula = str(item.get("formula", "")).strip()
+                    desc = html.escape(str(item.get("description", "")).strip())
+                elif isinstance(item, str):
+                    raw_formula = item.strip()
+                    desc = ""
+                else:
+                    continue
+                if not raw_formula:
+                    continue
                 if not raw_formula.startswith("$$"):
                     raw_formula = f"$${raw_formula}$$"
                 desc_html = f'<p class="formula-desc">{desc}</p>' if desc else ''
@@ -108,12 +116,13 @@ def _build_html(study_guide, video_title: str) -> str:
                   {desc_html}
                 </div>
                 ''')
-            formulas_html = f'''
-            <div class="formulas-container">
-              <div class="box-header"><span class="box-icon">📐</span> Mathematical Formulations & Identities</div>
-              {"".join(formula_cards)}
-            </div>
-            '''
+            if formula_cards:
+                formulas_html = f'''
+                <div class="formulas-container">
+                  <div class="box-header"><span class="box-icon">📐</span> Mathematical Formulations & Identities</div>
+                  {"".join(formula_cards)}
+                </div>
+                '''
 
         # 4. Key Takeaways
         takeaways_html = ""
@@ -696,6 +705,7 @@ def build_study_guide_pdf(
             "--disable-dev-shm-usage",
             "--disable-gpu",
             "--disable-software-rasterizer",
+            "--allow-file-access-from-files",
             "--no-pdf-header-footer",
             "--run-all-compositor-stages-before-draw",
             f"--print-to-pdf={output_path.resolve()}",
@@ -848,9 +858,16 @@ def build_study_guide_pdf(
                 pdf.set_font(font_family, "", 8)
                 pdf.set_text_color(30, 41, 59)
                 for item in ch.latex_formulas:
-                    f_eq = item.get("formula", "")
-                    f_desc = item.get("description", "")
-                    safe_multi(f"  Eq: {f_eq}", h=4)
+                    if isinstance(item, dict):
+                        f_eq = str(item.get("formula", "")).strip()
+                        f_desc = str(item.get("description", "")).strip()
+                    elif isinstance(item, str):
+                        f_eq = item.strip()
+                        f_desc = ""
+                    else:
+                        continue
+                    if f_eq:
+                        safe_multi(f"  Eq: {f_eq}", h=4)
                     if f_desc:
                         safe_multi(f"      {f_desc}", h=4)
                     pdf.ln(1)

@@ -464,13 +464,15 @@ def pass2_ai_verify(
         )
 
         is_slide = bool(result.get("is_slide", False))
-        is_new_content = bool(result.get("is_new_content", False))
+        is_new_content = bool(result.get("is_new_content", True))
         slide_title = str(result.get("slide_title", f"Slide {pos}"))[:80]
 
-        status = "ACCEPTED" if (is_slide and is_new_content) else "REJECTED"
+        # Pass 1 (CV) already verified this was a distinct transition/frame.
+        # Pass 2 verifies that the frame is indeed presentation content (slides, code, boards, plots).
+        status = "ACCEPTED" if is_slide else "REJECTED"
         log.info("  [%d/%d] %s @%.1fs: '%s'", pos, total_candidates, status, candidate.timestamp_sec, slide_title)
 
-        if is_slide and is_new_content:
+        if is_slide:
             slide_obj = VerifiedSlide(
                 frame_index=candidate.frame_index,
                 timestamp_sec=candidate.timestamp_sec,
