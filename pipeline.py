@@ -584,113 +584,16 @@ def run_pipeline(job_id: str, video_url: str, jobs_root: Path, gemini_api_key: s
         )
         log.info("[%s] Slides PDF ready: %s", job_id, slides_pdf_path)
 
-        # ── Step 7: Fetch Transcript ───────────────────────────────────────
-        _write_status(job_dir, "fetching_transcript", 85,
-                      "Fetching video transcript for study guide...")
-        log.info("[%s] Fetching transcript...", job_id)
-
-        transcript_tmp = tempfile.mkdtemp(prefix=f"yt2pdf_tr_{job_id}_")
-        try:
-            from transcript_fetcher import fetch_transcript
-            transcript_segments = fetch_transcript(video_url, tmp_dir=transcript_tmp)
-            log.info("[%s] Got %d transcript segments", job_id, len(transcript_segments))
-            try:
-                (job_dir / "transcript.json").write_text(json.dumps(transcript_segments, ensure_ascii=False), encoding="utf-8")
-            except Exception as tr_save_err:
-                log.warning("[%s] Failed to write transcript.json: %s", job_id, tr_save_err)
-        except Exception as e:
-            log.warning("[%s] Transcript fetch failed (will use image-only): %s", job_id, e)
-            transcript_segments = []
-        finally:
-            shutil.rmtree(transcript_tmp, ignore_errors=True)
-
-        # ── Step 8: AI Study Guide Generation ─────────────────────────────
-        _write_status(job_dir, "generating_guide", 87,
-                      f"AI writing study guide for {len(verified)} slides...")
-        log.info("[%s] Starting study guide generation...", job_id)
-
-        from study_guide_generator import generate_study_guide_content
-
-        guide_progress = {"i": 0}
-
-        def guide_cb(i, total):
-            guide_progress["i"] = i
-            pct = 87 + int((i / total) * 10)   # 87-97%
-            _write_status(
-                job_dir, "generating_guide", min(pct, 97),
-                f"AI writing section {i} of {total}...",
-                slide_count=len(verified),
-            )
-
-        crops_dir = job_dir / "diagram_crops"
-        crops_dir.mkdir(parents=True, exist_ok=True)
-
-        try:
-            study_guide = generate_study_guide_content(
-                slides=verified,
-                transcript_segments=transcript_segments,
-                total_duration=float(duration),
-                gemini_api_key=gemini_api_key,
-                crops_dir=crops_dir,
-                gemini_model="gemini-2.0-flash",
-                progress_cb=guide_cb,
-            )
-
-            # ── Step 9: Build Study Guide PDF ─────────────────────────────
-            _write_status(job_dir, "generating_guide", 97,
-                          "Compiling study guide PDF...", slide_count=len(verified))
-            log.info("[%s] Building study guide PDF...", job_id)
-
-            from pdf_study_guide import build_study_guide_pdf
-            guide_pdf_path = job_dir / "study_guide.pdf"
-            build_study_guide_pdf(
-                study_guide=study_guide,
-                output_path=guide_pdf_path,
-                video_title=video_title,
-            )
-            log.info("[%s] Study guide PDF ready: %s", job_id, guide_pdf_path)
-            guide_ready = True
-
-        except Exception as e:
-            log.exception("[%s] Study guide generation failed: %s", job_id, e)
-            guide_ready = False
-
-        if not guide_ready and verified:
-            try:
-                log.info("[%s] Compiling guaranteed deterministic slide study guide...", job_id)
-                from study_guide_generator import generate_deterministic_study_guide
-                from pdf_study_guide import build_study_guide_pdf
-                det_guide = generate_deterministic_study_guide(
-                    slides=verified,
-                    transcript_segments=transcript_segments,
-                    video_title=video_title,
-                    total_duration=float(duration),
-                    crops_dir=crops_dir,
-                )
-                guide_pdf_path = job_dir / "study_guide.pdf"
-                build_study_guide_pdf(
-                    study_guide=det_guide,
-                    output_path=guide_pdf_path,
-                    video_title=video_title,
-                )
-                guide_ready = guide_pdf_path.exists() and guide_pdf_path.stat().st_size > 500
-                log.info("[%s] Guaranteed study guide ready: %s (size: %d bytes)",
-                         job_id, guide_ready, guide_pdf_path.stat().st_size if guide_pdf_path.exists() else 0)
-            except Exception as det_err:
-                log.warning("[%s] Guaranteed fallback failed: %s", job_id, det_err)
-
         # ── Done ───────────────────────────────────────────────────────────
         _write_status(
             job_dir, "completed", 100,
-            f"Done! {len(verified)} slides extracted."
-            + (" Study guide also ready!" if guide_ready else ""),
+            f"Done! {len(verified)} slides extracted.",
             slide_count=len(verified),
         )
         # Write a flags file so the frontend knows what's available
         (job_dir / "outputs.json").write_text(json.dumps({
             "slides_pdf": True,
-            "study_guide_pdf": guide_ready,
-            "has_transcript": bool(transcript_segments),
+            "study_guide_pdf": False,
             "slide_count": len(verified),
         }))
 
@@ -831,97 +734,18 @@ def run_pipeline_from_frames(
         )
         log.info("[%s] Slides PDF ready: %s", job_id, slides_pdf_path)
 
-        # Transcript & Study guide (Guaranteed Generation)
-        guide_ready = False
-        transcript_segments = client_transcript or []
-        if not transcript_segments:
-            try:
-                from transcript_fetcher import fetch_transcript
-                transcript_tmp = tempfile.mkdtemp(prefix=f"yt2pdf_tr_{job_id}_")
-                try:
-                    transcript_segments = fetch_transcript(video_url, tmp_dir=transcript_tmp)
-                finally:
-                    shutil.rmtree(transcript_tmp, ignore_errors=True)
-            except Exception as tr_err:
-                log.warning("[%s] Server transcript fetch failed: %s", job_id, tr_err)
-                transcript_segments = []
-
-        try:
-            (job_dir / "transcript.json").write_text(json.dumps(transcript_segments, ensure_ascii=False), encoding="utf-8")
-        except Exception as tr_save_err:
-            log.warning("[%s] Failed to write transcript.json: %s", job_id, tr_save_err)
-
-        crops_dir = job_dir / "diagram_crops"
-        crops_dir.mkdir(parents=True, exist_ok=True)
-
-        if gemini_api_key and gemini_api_key != "YOUR_GEMINI_API_KEY_HERE":
-            try:
-                if transcript_segments:
-                    log.info("[%s] Generating study guide with %d transcript segments...", job_id, len(transcript_segments))
-                    _write_status(job_dir, "generating_guide", 88, f"AI writing study guide with lecture transcript for {len(verified)} slides...")
-                else:
-                    log.info("[%s] No audio captions detected; generating study guide directly from slide visual formulas & diagrams...", job_id)
-                    _write_status(job_dir, "generating_guide", 88, f"AI synthesizing study guide from slide formulas & diagrams ({len(verified)} slides)...")
-
-                from study_guide_generator import generate_study_guide_content
-                study_guide = generate_study_guide_content(
-                    slides=verified,
-                    transcript_segments=transcript_segments,
-                    total_duration=float(duration),
-                    gemini_api_key=gemini_api_key,
-                    crops_dir=crops_dir,
-                    gemini_model="gemini-2.0-flash",
-                )
-                from pdf_study_guide import build_study_guide_pdf
-                guide_pdf_path = job_dir / "study_guide.pdf"
-                build_study_guide_pdf(
-                    study_guide=study_guide,
-                    output_path=guide_pdf_path,
-                    video_title=video_title,
-                )
-                guide_ready = True
-                log.info("[%s] Study guide PDF ready: %s", job_id, guide_pdf_path)
-            except Exception as guide_err:
-                log.warning("[%s] Study guide generation failed: %s", job_id, guide_err)
-
-        if not guide_ready and verified:
-            try:
-                log.info("[%s] Compiling guaranteed deterministic slide study guide for companion job...", job_id)
-                from study_guide_generator import generate_deterministic_study_guide
-                from pdf_study_guide import build_study_guide_pdf
-                det_guide = generate_deterministic_study_guide(
-                    slides=verified,
-                    transcript_segments=transcript_segments,
-                    video_title=video_title,
-                    total_duration=float(duration),
-                    crops_dir=crops_dir,
-                )
-                guide_pdf_path = job_dir / "study_guide.pdf"
-                build_study_guide_pdf(
-                    study_guide=det_guide,
-                    output_path=guide_pdf_path,
-                    video_title=video_title,
-                )
-                guide_ready = guide_pdf_path.exists() and guide_pdf_path.stat().st_size > 500
-                log.info("[%s] Guaranteed companion study guide ready: %s (size: %d bytes)",
-                         job_id, guide_ready, guide_pdf_path.stat().st_size if guide_pdf_path.exists() else 0)
-            except Exception as det_err:
-                log.warning("[%s] Guaranteed companion fallback failed: %s", job_id, det_err)
-
         # Cleanup raw frames
         shutil.rmtree(raw_frames_dir, ignore_errors=True)
 
         # Write final completion status & outputs
         _write_status(
             job_dir, "completed", 100,
-            f"Done! {len(verified)} slides extracted."
-            + (" Study guide also ready!" if guide_ready else ""),
+            f"Done! {len(verified)} slides extracted.",
             slide_count=len(verified),
         )
         (job_dir / "outputs.json").write_text(json.dumps({
             "slides_pdf": True,
-            "study_guide_pdf": guide_ready,
-            "has_transcript": bool(transcript_segments),
+            "study_guide_pdf": False,
             "slide_count": len(verified),
         }))
 

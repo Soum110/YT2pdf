@@ -400,120 +400,8 @@ async def download_slides_pdf(job_id: str):
 
 @app.api_route("/api/download/{job_id}/guide", methods=["GET", "HEAD"])
 async def download_guide_pdf(job_id: str):
-    """Download the AI study guide PDF with guaranteed on-demand generation."""
-    pdf_path = JOBS_ROOT / job_id / "study_guide.pdf"
-    slides_dir = JOBS_ROOT / job_id / "slides"
-    meta_file = JOBS_ROOT / job_id / "meta.json"
-
-    # Guaranteed On-Demand Generation: If study_guide.pdf is missing or was corrupted,
-    # generate it on the fly using Gemini AI (if key available) or deterministic simulation compilation!
-    if (not pdf_path.exists() or pdf_path.stat().st_size < 500) and slides_dir.exists():
-        slide_files = sorted(slides_dir.glob("slide_*.png"))
-        if slide_files:
-            try:
-                import json, re
-                from pdf_study_guide import build_study_guide_pdf
-                from slide_extractor import VerifiedSlide
-
-                video_title = "Educational Lecture Study Guide"
-                duration = 0.0
-                if meta_file.exists():
-                    try:
-                        mdata = json.loads(meta_file.read_text())
-                        video_title = mdata.get("title") or mdata.get("video_title") or video_title
-                        duration = float(mdata.get("duration", 0.0))
-                    except Exception:
-                        pass
-
-                transcript_file = JOBS_ROOT / job_id / "transcript.json"
-                transcript_segments = []
-                if transcript_file.exists():
-                    try:
-                        transcript_segments = json.loads(transcript_file.read_text(encoding="utf-8"))
-                    except Exception as tr_err:
-                        log.warning("[%s] Failed to read transcript.json: %s", job_id, tr_err)
-
-                crops_dir = JOBS_ROOT / job_id / "diagram_crops"
-                crops_dir.mkdir(parents=True, exist_ok=True)
-
-                verified = []
-                for idx, sf in enumerate(slide_files, 1):
-                    m = re.search(r"t(\d+)s", sf.name)
-                    ts = float(m.group(1)) if m else float(idx * 30)
-                    mins, secs = divmod(int(ts), 60)
-                    verified.append(
-                        VerifiedSlide(
-                            frame_index=idx,
-                            timestamp_sec=ts,
-                            image_or_path=sf,
-                            slide_title=f"Slide {idx} ({mins:02d}:{secs:02d})",
-                            is_slide=True,
-                            is_new_content=True,
-                        )
-                    )
-
-                guide_obj = None
-                if GEMINI_API_KEY and GEMINI_API_KEY != "YOUR_GEMINI_API_KEY_HERE":
-                    try:
-                        log.info("[%s] Attempting AI Gemini study guide generation on-demand...", job_id)
-                        from study_guide_generator import generate_study_guide_content
-                        guide_obj = generate_study_guide_content(
-                            slides=verified,
-                            transcript_segments=transcript_segments,
-                            total_duration=duration,
-                            gemini_api_key=GEMINI_API_KEY,
-                            crops_dir=crops_dir,
-                            gemini_model="gemini-2.0-flash",
-                        )
-                    except Exception as ai_err:
-                        log.warning("[%s] On-demand AI study guide failed, falling back to deterministic: %s", job_id, ai_err)
-                        guide_obj = None
-
-                if guide_obj is None:
-                    from study_guide_generator import generate_deterministic_study_guide
-                    guide_obj = generate_deterministic_study_guide(
-                        slides=verified,
-                        transcript_segments=transcript_segments,
-                        video_title=video_title,
-                        total_duration=duration,
-                        crops_dir=crops_dir,
-                    )
-
-                build_study_guide_pdf(
-                    study_guide=guide_obj,
-                    output_path=pdf_path,
-                    video_title=video_title,
-                )
-                log.info("[%s] On-demand study guide compiled successfully: %d bytes",
-                         job_id, pdf_path.stat().st_size if pdf_path.exists() else 0)
-            except Exception as guide_err:
-                log.exception("[%s] On-demand study guide generation error: %s", job_id, guide_err)
-
-    if not pdf_path.exists() or pdf_path.stat().st_size < 100:
-        raise HTTPException(status_code=404, detail="Study guide PDF not ready yet or job not found.")
-
-    import json
-    meta_file = JOBS_ROOT / job_id / "meta.json"
-    filename = "study_guide.pdf"
-    if meta_file.exists():
-        try:
-            meta = json.loads(meta_file.read_text())
-            raw_title = meta.get("video_title") or meta.get("title") or "study_guide"
-            safe = "".join(c if c.isalnum() or c in " -_" else "_" for c in raw_title)
-            filename = f"{safe[:50].strip()}_study_guide.pdf"
-        except Exception:
-            pass
-
-    return FileResponse(
-        path=str(pdf_path),
-        media_type="application/pdf",
-        filename=filename,
-        headers={
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Expose-Headers": "Content-Disposition",
-            "Cache-Control": "no-cache",
-        },
-    )
+    """Download the AI study guide PDF (removed)."""
+    raise HTTPException(status_code=404, detail="Study guide feature has been removed.")
 
 
 @app.get("/api/outputs/{job_id}")
@@ -529,18 +417,17 @@ async def get_outputs(job_id: str):
             data = json.loads(outputs_file.read_text())
             if has_slides:
                 data["slides_pdf"] = True
-                data["study_guide_pdf"] = True
+            data["study_guide_pdf"] = False
             return JSONResponse(content=data)
         except Exception:
             pass
 
     # Fallback: check files and slides directory directly
     has_slides_pdf = (JOBS_ROOT / job_id / "output.pdf").exists() or has_slides
-    has_guide_pdf = (JOBS_ROOT / job_id / "study_guide.pdf").exists() or has_slides
     slide_count = len(list(slides_dir.glob("slide_*.png"))) if slides_dir.exists() else 0
     return JSONResponse(content={
         "slides_pdf": has_slides_pdf,
-        "study_guide_pdf": has_guide_pdf,
+        "study_guide_pdf": False,
         "slide_count": slide_count,
     })
 
@@ -632,10 +519,9 @@ async def rebuild_slides_pdf(job_id: str, req: RebuildSlidesRequest):
 
     # Update outputs.json with new slide count
     outputs_file = JOBS_ROOT / job_id / "outputs.json"
-    guide_ready = (JOBS_ROOT / job_id / "study_guide.pdf").exists()
     outputs_file.write_text(json.dumps({
         "slides_pdf": True,
-        "study_guide_pdf": guide_ready,
+        "study_guide_pdf": False,
         "slide_count": len(valid_paths),
     }))
 
