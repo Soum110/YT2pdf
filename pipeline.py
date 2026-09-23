@@ -406,7 +406,7 @@ def _download_video(url: str, output_path: str, progress_hook: Optional[Callable
                     ydl.download([url])
 
             fut = ex.submit(_do_dl)
-            fut.result(timeout=75)  # Max 75 seconds for download
+            fut.result(timeout=240)  # Max 240 seconds (4 min) for complete video download
 
             candidates = list(Path(output_path).parent.glob(Path(output_path).stem + "*"))
             mp4s = [c for c in candidates if str(c).endswith(".mp4")]
@@ -502,8 +502,8 @@ def run_pipeline(job_id: str, video_url: str, jobs_root: Path, gemini_api_key: s
 
         config = ExtractorConfig(
             sample_fps=1,
-            ssim_threshold=0.85,
-            debounce_seconds=3,
+            ssim_threshold=0.94,
+            debounce_seconds=2,
             gemini_api_key=gemini_api_key,
             gemini_model="gemini-2.0-flash",
             output_dir=slides_dir,

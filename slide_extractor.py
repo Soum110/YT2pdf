@@ -53,8 +53,8 @@ class ExtractorConfig:
 
     # --- Pass 1: OpenCV ---
     sample_fps: int = 1                  # Sample 1 frame per second
-    ssim_threshold: float = 0.85         # Drop below this -> slide transition
-    debounce_seconds: int = 3            # Ignore frames for N seconds after a transition
+    ssim_threshold: float = 0.94         # Sensitive threshold to capture slide text/diagram changes
+    debounce_seconds: int = 2            # Ignore frames for N seconds after a transition
 
     # --- Pass 2: Gemini AI ---
     gemini_api_key: str = "YOUR_GEMINI_API_KEY_HERE"   # <- Replace this
@@ -227,18 +227,22 @@ def pass1_find_candidates(
                 progress_cb(frame_count, total_sampled, ts)
             continue
 
-        # Compute SSIM (fast because we downscaled to 320px wide)
+        # Compute SSIM and L1 mean pixel difference (fast downscaled 320px)
         score = ssim(last_gray, gray, full=False)
+        diff_score = float(np.mean(np.abs(last_gray.astype(np.float32) - gray.astype(np.float32))) / 255.0)
 
         if progress_cb:
             progress_cb(frame_count, total_sampled, ts)
 
         in_debounce = (ts - last_accepted_ts) < config.debounce_seconds
 
-        if score < config.ssim_threshold and not in_debounce:
+        # Trigger if SSIM indicates structural change OR L1 difference indicates text/formula added
+        is_transition = (score < config.ssim_threshold) or (diff_score > 0.022)
+
+        if is_transition and not in_debounce:
             log.info(
-                "  [%5.1fs] SSIM=%.3f < %.2f -> CANDIDATE #%d",
-                ts, score, config.ssim_threshold, len(candidates) + 1,
+                "  [%5.1fs] SSIM=%.3f (thresh=%.2f) diff=%.3f -> CANDIDATE #%d",
+                ts, score, config.ssim_threshold, diff_score, len(candidates) + 1,
             )
             cand_path = cand_dir / f"cand_{len(candidates):04d}_t{int(ts):05d}s.jpg"
             cv2.imwrite(str(cand_path), frame, [cv2.IMWRITE_JPEG_QUALITY, 92])
@@ -246,7 +250,32 @@ def pass1_find_candidates(
             last_gray = gray
             last_accepted_ts = ts
         else:
-            log.debug("  [%5.1fs] SSIM=%.3f  skip (debounce=%s)", ts, score, in_debounce)
+            log.debug("  [%5.1fs] SSIM=%.3f diff=%.3f skip (debounce=%s)", ts, score, diff_score, in_debounce)
+
+    duration_sec = total_frames / native_fps if native_fps > 0 else 0
+    # Safety Net: If a video > 60s yielded fewer than 6 candidates,
+    # sample regular checkpoints so subtle lecture slides are NEVER missed!
+    if len(candidates) < 6 and duration_sec > 60:
+        log.info("Pass 1 detected only %d candidates for %.1fs video. Sampling uniform checkpoints...",
+                 len(candidates), duration_sec)
+        step_sec = max(25.0, duration_sec / 18.0)
+        target_ts_list = np.arange(8.0, duration_sec - 5.0, step_sec)
+        existing_ts = {int(c.timestamp_sec) for c in candidates}
+        cap_chk = cv2.VideoCapture(video_path)
+        for ts_target in target_ts_list:
+            if any(abs(ts_target - et) < 14.0 for et in existing_ts):
+                continue
+            f_idx = int(ts_target * native_fps)
+            cap_chk.set(cv2.CAP_PROP_POS_FRAMES, f_idx)
+            ret_chk, frame_chk = cap_chk.read()
+            if ret_chk and frame_chk is not None:
+                cand_path = cand_dir / f"cand_{len(candidates):04d}_t{int(ts_target):05d}s.jpg"
+                cv2.imwrite(str(cand_path), frame_chk, [cv2.IMWRITE_JPEG_QUALITY, 92])
+                candidates.append(CandidateFrame(f_idx, ts_target, cand_path))
+                existing_ts.add(int(ts_target))
+        cap_chk.release()
+        candidates.sort(key=lambda c: c.timestamp_sec)
+        log.info("Total candidates after uniform checkpoint coverage: %d", len(candidates))
 
     log.info("Pass 1 complete: %d candidate frames found (streamed to disk, RAM < 80MB)", len(candidates))
     return candidates
@@ -267,12 +296,12 @@ Evaluate the provided image and return:
 }
 
 Rules:
-- "is_slide" = true ONLY if the frame is clearly a presentation slide (PowerPoint, Keynote, Google Slides, whiteboard, PDF slide, etc.).
-  Set false for: webcam footage of a person, desktop/file explorer views, video thumbnails, or plain screen transitions.
-- "is_new_content" = true if the slide has new printed/digital text or graphics not present in the previous slide.
-  Set false if it is clearly the SAME slide with only handwritten pen/marker annotations added on top.
+- "is_slide" = true for any educational or lecture presentation content: presentation slides (PowerPoint/Keynote/Google Slides), PDF documents, lecture notes, textbook pages, whiteboard/blackboard math, technical diagrams, or code editors/notebooks.
+  Set false ONLY for: full-screen webcam footage of a person without slides, sponsor ads/bumper screens, video thumbnails, or solid black/blank transitions.
+  If in doubt, set "is_slide": true to ensure valuable lecture material is never omitted.
+- "is_new_content" = true if the slide has new content, distinct text, or updated formulas.
   (For the very first slide, always set true.)
-- "slide_title" = the main title text on the slide (exact text, max 80 chars). If none is visible, return "Untitled Slide".
+- "slide_title" = the main title or heading visible on the slide (exact text, max 80 chars). If none is clearly visible, return "Lecture Slide".
 """
 
 GEMINI_USER_PROMPT = "Evaluate this video frame. Is it a presentation slide? Does it have new content compared to the previous slide?"
@@ -500,6 +529,24 @@ def pass2_ai_verify(
 
     # Reconstruct strictly in original timestamp order
     verified = [verified_by_idx[c.frame_index] for c in candidates if c.frame_index in verified_by_idx]
+
+    # Safety net: If Pass 1 found candidate transitions (>=4) but Gemini over-filtered down to <=1,
+    # preserve candidate slides so the user never gets an empty or incomplete PDF!
+    if len(candidates) >= 4 and len(verified) <= 1:
+        log.warning("AI filter was overly aggressive (%d/%d kept). Keeping candidates to preserve complete lecture content.",
+                    len(verified), total_candidates)
+        verified = [
+            VerifiedSlide(
+                frame_index=c.frame_index,
+                timestamp_sec=c.timestamp_sec,
+                image_or_path=c.image_path,
+                slide_title=f"Slide {i}",
+                is_slide=True,
+                is_new_content=True,
+            )
+            for i, c in enumerate(candidates, 1)
+        ]
+
     log.info("Pass 2 complete: %d/%d frames verified as clean slides", len(verified), total_candidates)
     return verified
 

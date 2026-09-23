@@ -682,7 +682,8 @@
           isDistinct = true;
         } else {
           const diff = calculateDifference(thumbCanvas, lastCapturedCanvas);
-          if (diff >= 0.065) {
+          // 0.018 captures text, formula, and diagram changes even on identical slide templates
+          if (diff >= 0.018) {
             isDistinct = true;
           }
         }
@@ -696,6 +697,32 @@
             data: captureCanvas.toDataURL("image/jpeg", 0.76)
           });
         }
+      }
+
+      // Safety Net: If subtle transitions yielded fewer than 5 slides on a video > 60s,
+      // extract uniform checkpoints across the lecture so NO slides are skipped!
+      if (capturedSlides.length < 5 && duration > 60 && finalPoints.length >= 6) {
+        console.log(`[YT2PDF Companion] Only ${capturedSlides.length} slides detected. Adding uniform checkpoint slides across lecture...`);
+        const existingTs = new Set(capturedSlides.map(s => Math.floor(s.timestamp)));
+        const checkpointStep = Math.max(1, Math.floor(finalPoints.length / 10));
+        for (let idx = 0; idx < finalPoints.length; idx += checkpointStep) {
+          const tPoint = finalPoints[idx];
+          if (![...existingTs].some(ts => Math.abs(ts - tPoint) < 15)) {
+            try {
+              video.currentTime = tPoint;
+              await unthrottledSleep(180);
+              captureCtx.drawImage(video, 0, 0, 1280, 720);
+              capturedSlides.push({
+                timestamp: tPoint,
+                time_formatted: `${Math.floor(tPoint / 60)}:${String(tPoint % 60).padStart(2, "0")}`,
+                data: captureCanvas.toDataURL("image/jpeg", 0.76)
+              });
+              existingTs.add(Math.floor(tPoint));
+            } catch (e) {}
+          }
+        }
+        capturedSlides.sort((a, b) => a.timestamp - b.timestamp);
+        console.log(`[YT2PDF Companion] Total slides after checkpoint coverage: ${capturedSlides.length}`);
       }
 
       if (capturedSlides.length === 0) {
@@ -895,7 +922,7 @@
           isDistinct = true;
         } else {
           const diff = calculateDifference(thumbCanvas, lastCapturedCanvas);
-          if (diff >= 0.065) {
+          if (diff >= 0.018) {
             isDistinct = true;
           }
         }
@@ -911,6 +938,32 @@
             data: base64Data
           });
         }
+      }
+
+      // Safety Net: If subtle transitions yielded fewer than 5 slides on a video > 60s,
+      // extract uniform checkpoints across the lecture so NO slides are skipped!
+      if (capturedSlides.length < 5 && duration > 60 && finalPoints.length >= 6) {
+        console.log(`[YT2PDF Companion] Only ${capturedSlides.length} slides detected. Adding uniform checkpoint slides across lecture...`);
+        const existingTs = new Set(capturedSlides.map(s => Math.floor(s.timestamp)));
+        const checkpointStep = Math.max(1, Math.floor(finalPoints.length / 10));
+        for (let idx = 0; idx < finalPoints.length; idx += checkpointStep) {
+          const tPoint = finalPoints[idx];
+          if (![...existingTs].some(ts => Math.abs(ts - tPoint) < 15)) {
+            try {
+              video.currentTime = tPoint;
+              await new Promise(r => setTimeout(r, 200));
+              captureCtx.drawImage(video, 0, 0, 1280, 720);
+              capturedSlides.push({
+                timestamp: tPoint,
+                time_formatted: `${Math.floor(tPoint / 60)}:${String(tPoint % 60).padStart(2, "0")}`,
+                data: captureCanvas.toDataURL("image/jpeg", 0.78)
+              });
+              existingTs.add(Math.floor(tPoint));
+            } catch (e) {}
+          }
+        }
+        capturedSlides.sort((a, b) => a.timestamp - b.timestamp);
+        console.log(`[YT2PDF Companion] Total slides after checkpoint coverage: ${capturedSlides.length}`);
       }
 
       if (capturedSlides.length === 0) {
