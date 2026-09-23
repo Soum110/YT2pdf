@@ -74,7 +74,7 @@ def _build_html(study_guide, video_title: str) -> str:
                 cap = html.escape(fig.caption)
                 exp = html.escape(fig.explanation)
                 exp_p = f'<p class="figure-explanation">{exp}</p>' if exp else ''
-                badge = '<div class="sim-badge">🔬 Technical Simulation</div>' if fig.fig_type == "simulation" else '<div class="diag-badge">📷 Lecture Schematic</div>'
+                badge = '<div class="sim-badge">🔬 Pedagogical Schematic</div>' if fig.fig_type == "simulation" else '<div class="diag-badge">📐 Cropped Technical Diagram</div>'
                 card_class = "simulation-card" if fig.fig_type == "simulation" else "figure-card"
 
                 figures_html += f'''

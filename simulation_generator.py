@@ -163,6 +163,93 @@ def generate_dot_cross_product_figure(output_path: Path) -> Path:
     return output_path
 
 
+def generate_automaton_figure(output_path: Path) -> Path:
+    """Generates an academic Finite Automaton (DFA) state transition diagram."""
+    import matplotlib.patches as patches
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    fig, ax = plt.subplots(figsize=(7.5, 3.8), dpi=220)
+    ax.set_xlim(-1, 9)
+    ax.set_ylim(-2, 3)
+    ax.axis("off")
+
+    # Start arrow into initial state q0
+    ax.annotate("", xy=(0.8, 0.5), xytext=(-0.5, 0.5),
+                arrowprops=dict(arrowstyle="->", lw=2.2, color="#1e293b"))
+    ax.text(-0.3, 0.8, "Start", fontsize=11, fontweight="bold", color="#1e293b")
+
+    # Initial state q0
+    c0 = plt.Circle((2, 0.5), 0.8, facecolor="#dbeafe", edgecolor="#2563eb", lw=2.5)
+    ax.add_patch(c0)
+    ax.text(2, 0.5, r"$q_0$", fontsize=16, fontweight="bold", ha="center", va="center", color="#1e3a8a")
+
+    # Accept state q1 (double circle)
+    c1_out = plt.Circle((6, 0.5), 0.8, facecolor="#dcfce7", edgecolor="#16a34a", lw=2.5)
+    c1_in = plt.Circle((6, 0.5), 0.68, facecolor="#dcfce7", edgecolor="#16a34a", lw=1.8)
+    ax.add_patch(c1_out)
+    ax.add_patch(c1_in)
+    ax.text(6, 0.5, r"$q_1$", fontsize=16, fontweight="bold", ha="center", va="center", color="#14532d")
+
+    # Transition q0 -> q1 (curve above)
+    ax.annotate("", xy=(5.2, 0.8), xytext=(2.8, 0.8),
+                arrowprops=dict(arrowstyle="->", lw=2.0, color="#2563eb", connectionstyle="arc3,rad=-0.35"))
+    ax.text(4, 1.8, "input = 1", fontsize=11, fontweight="bold", ha="center", color="#2563eb")
+
+    # Transition q1 -> q0 (curve below)
+    ax.annotate("", xy=(2.8, 0.2), xytext=(5.2, 0.2),
+                arrowprops=dict(arrowstyle="->", lw=2.0, color="#16a34a", connectionstyle="arc3,rad=-0.35"))
+    ax.text(4, -1.1, "input = 0", fontsize=11, fontweight="bold", ha="center", color="#16a34a")
+
+    # Self-loop on q0 (input 0)
+    ax.annotate("", xy=(1.5, 1.2), xytext=(2.5, 1.2),
+                arrowprops=dict(arrowstyle="->", lw=1.8, color="#475569", connectionstyle="arc3,rad=-1.8"))
+    ax.text(2, 2.3, "0", fontsize=11, fontweight="bold", ha="center", color="#475569")
+
+    # Self-loop on q1 (input 1)
+    ax.annotate("", xy=(5.5, 1.2), xytext=(6.5, 1.2),
+                arrowprops=dict(arrowstyle="->", lw=1.8, color="#475569", connectionstyle="arc3,rad=-1.8"))
+    ax.text(6, 2.3, "1", fontsize=11, fontweight="bold", ha="center", color="#475569")
+
+    ax.set_title("Deterministic Finite Automaton (DFA): State Transition Graph", fontsize=12, fontweight="bold", pad=15, color="#0f172a")
+    plt.tight_layout()
+    plt.savefig(str(output_path), bbox_inches="tight", dpi=220)
+    plt.close(fig)
+    log.info("Generated automaton figure: %s", output_path)
+    return output_path
+
+
+def generate_chomsky_hierarchy_figure(output_path: Path) -> Path:
+    """Generates an academic Chomsky Hierarchy nested language classification diagram."""
+    import matplotlib.patches as patches
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    fig, ax = plt.subplots(figsize=(7.5, 5.0), dpi=220)
+    ax.set_xlim(-5, 5)
+    ax.set_ylim(-3.5, 4.2)
+    ax.axis("off")
+
+    layers = [
+        (4.6, 3.4, "#f8fafc", "#94a3b8", "Type 0: Recursively Enumerable (Turing Machines)", 3.0, "#334155"),
+        (3.8, 2.7, "#eff6ff", "#60a5fa", "Type 1: Context-Sensitive (Linear Bounded Automata)", 2.2, "#1e40af"),
+        (2.9, 1.9, "#f0fdf4", "#4ade80", "Type 2: Context-Free (Pushdown Automata)", 1.4, "#166534"),
+        (1.9, 1.1, "#fef3c7", "#f59e0b", "Type 3: Regular Languages (Finite State Automata)", 0.5, "#92400e")
+    ]
+
+    for w, h, fc, ec, lbl, y_text, tc in layers:
+        ellipse = patches.Ellipse((0, 0), w * 2, h * 2, facecolor=fc, edgecolor=ec, lw=2.0)
+        ax.add_patch(ellipse)
+        ax.text(0, y_text, lbl, fontsize=9.5, fontweight="bold", ha="center", color=tc)
+
+    ax.set_title("The Chomsky Hierarchy of Formal Languages & Computational Automata", fontsize=12, fontweight="bold", pad=12, color="#0f172a")
+    plt.tight_layout()
+    plt.savefig(str(output_path), bbox_inches="tight", dpi=220)
+    plt.close(fig)
+    log.info("Generated Chomsky hierarchy figure: %s", output_path)
+    return output_path
+
+
 def execute_custom_simulation_code(code_str: str, output_path: Path) -> Optional[Path]:
     """Safely executes AI-generated matplotlib code to generate a custom diagram."""
     if not code_str or not code_str.strip():

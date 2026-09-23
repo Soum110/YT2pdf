@@ -195,7 +195,7 @@ def _encode_image(image_bgr: Optional[np.ndarray], max_width: int = 1000, qualit
         return ""
 
 
-PREFERRED_STUDY_MODELS = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-2.5-flash"]
+PREFERRED_STUDY_MODELS = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
 
 
 def _safe_generate_content(client, model: str, contents, config=None, retries: int = 2):
@@ -224,54 +224,64 @@ def _safe_generate_content(client, model: str, contents, config=None, retries: i
     raise last_err or RuntimeError("All model attempts failed.")
 
 
-def _extract_slide_formulas(client, gemini_model: str, slides: list, batch_size: int = 5) -> str:
+def _extract_slide_formulas(client, gemini_model: str, slides: list, batch_size: int = 6) -> str:
     """
-    Rapidly transcribes all visible mathematical formulas, equations, definitions,
-    and worked examples directly from slide images in multi-image batches.
+    Rapidly transcribes visible mathematical formulas, equations, definitions,
+    and worked examples directly from key slide images in a single streamlined batch.
+    Skips opening title/agenda cards.
     """
     from google.genai import types
 
     if not slides:
         return "No slide images available for formula extraction."
 
-    log.info("Extracting formulas and text across %d slides in batches of %d...", len(slides), batch_size)
+    # Filter out opening title/intro cards (t < 25s) if sufficient slides exist
+    content_slides = [s for s in slides if getattr(s, "timestamp_sec", 0.0) >= 25.0]
+    if not content_slides:
+        content_slides = slides
+
+    # Select up to 6 evenly distributed key content slides to preserve API quota
+    if len(content_slides) > 6:
+        step = max(1, len(content_slides) // 6)
+        target_slides = [content_slides[i] for i in range(0, len(content_slides), step)][:6]
+    else:
+        target_slides = content_slides
+
+    log.info("Extracting formulas and text across %d key content slides in a single pass...", len(target_slides))
     transcription_blocks = []
 
-    for batch_start in range(0, len(slides), batch_size):
-        batch = slides[batch_start : batch_start + batch_size]
-        parts = []
-        for idx_in_batch, slide in enumerate(batch, 1):
-            abs_idx = batch_start + idx_in_batch
-            mins, secs = divmod(int(slide.timestamp_sec), 60)
-            img = slide.image
-            if img is None:
-                continue
-            img_b64 = _encode_image(img, max_width=900, quality=80)
-            if not img_b64:
-                continue
-            parts.append(types.Part(inline_data=types.Blob(mime_type="image/jpeg", data=base64.b64decode(img_b64))))
-            parts.append(types.Part(text=f"Above is Slide {abs_idx} (timestamp {mins:02d}:{secs:02d})."))
-
-        if not parts:
+    parts = []
+    for idx, slide in enumerate(target_slides, 1):
+        mins, secs = divmod(int(getattr(slide, "timestamp_sec", 0.0)), 60)
+        img = getattr(slide, "image", None)
+        if img is None:
             continue
+        img_b64 = _encode_image(img, max_width=900, quality=80)
+        if not img_b64:
+            continue
+        parts.append(types.Part(inline_data=types.Blob(mime_type="image/jpeg", data=base64.b64decode(img_b64))))
+        parts.append(types.Part(text=f"Above is Slide {idx} (timestamp {mins:02d}:{secs:02d})."))
 
-        parts.append(types.Part(text="""For each slide above, rigorously transcribe:
+    if not parts:
+        return "No readable slide images available for formula extraction."
+
+    parts.append(types.Part(text="""For each slide above, rigorously transcribe:
 1. Exact slide title and topic headers.
 2. ALL mathematical formulas, equations, definitions, coordinate relations, and matrix notation formatted strictly in valid LaTeX ($...$ or $$...$$).
 3. Any worked numerical examples or algebraic steps shown on the slide.
 Format clearly by Slide Number."""))
 
-        try:
-            resp = _safe_generate_content(
-                client=client,
-                model=gemini_model,
-                contents=[types.Content(role="user", parts=parts)],
-                config=types.GenerateContentConfig(temperature=0.1, max_output_tokens=2048),
-            )
-            transcription_blocks.append(resp.text.strip())
-            log.info("  Transcribed slides %d-%d successfully.", batch_start + 1, batch_start + len(batch))
-        except Exception as e:
-            log.warning("  Batch transcription for slides %d-%d failed: %s", batch_start + 1, batch_start + len(batch), e)
+    try:
+        resp = _safe_generate_content(
+            client=client,
+            model=gemini_model,
+            contents=[types.Content(role="user", parts=parts)],
+            config=types.GenerateContentConfig(temperature=0.1, max_output_tokens=2500),
+        )
+        transcription_blocks.append(resp.text.strip())
+        log.info("  Key slides formula catalog extracted successfully.")
+    except Exception as e:
+        log.warning("  Key slides formula extraction failed: %s", e)
 
     combined_catalog = "\n\n".join(transcription_blocks)
     log.info("Slide formula catalog compiled: %d characters of mathematical content.", len(combined_catalog))
@@ -328,28 +338,41 @@ def _detect_and_crop_diagrams(
     saved_titles: List[str] = []
 
     detection_prompt = """Analyze this lecture slide image.
-Determine if there is a genuine technical diagram, circuit, schematic, geometric plot, chart, or vector visualization (EXCLUDING text bullet points, slide title headers, speaker photo, or pure equations).
+Identify if there is an ISOLATED, GENUINE visual technical graphic, schematic, circuit diagram, state transition graph, geometric chart, or data plot.
+STRICT RULES:
+1. DO NOT detect the whole slide, presentation borders, slide title headers, bulleted text blocks, course logos, or presenter camera feeds.
+2. "has_diagram" MUST be false if the slide only contains text, equations, tables, bullet points, or title cards.
+3. If a genuine isolated diagram is found, set "has_diagram": true and provide "box_2d" tightly enclosing ONLY the diagram graphic (not the slide title or text around it).
+
 Return JSON:
 {
   "has_diagram": true/false,
   "diagram_title": "<short descriptive title of the visual schematic>",
   "diagram_caption": "<formal academic figure caption describing the schematic>",
-  "diagram_explanation": "<detailed walkthrough of what the visual shows>",
-  "box_2d": [ymin, xmin, ymax, xmax]  // normalized 0-1000 tightly around diagram
+  "diagram_explanation": "<detailed walkthrough of what the visual schematic shows>",
+  "box_2d": [ymin, xmin, ymax, xmax]  // normalized 0-1000 tightly around diagram ONLY
 }"""
 
-    log.info("Scanning slides for distinct visual diagrams (max target: %d)...", max_diagrams)
+    log.info("Scanning content slides for distinct visual diagrams (max target: %d)...", max_diagrams)
     prev_slide_gray: Optional[np.ndarray] = None
 
-    # Sample up to 6 candidate slides across the video to prevent API rate limits
-    step = max(1, len(slides) // 6) if len(slides) > 6 else 1
-    candidate_slides = [slides[i] for i in range(0, len(slides), step)][:6]
+    # Only inspect content slides beyond opening title cards (t >= 45s) to avoid title logos
+    content_slides = [s for s in slides if getattr(s, "timestamp_sec", 0.0) >= 45.0]
+    if not content_slides:
+        content_slides = slides[1:] if len(slides) > 1 else slides
+
+    # Sample at most 4 candidate slides to prevent rate limits and timeouts
+    if len(content_slides) > 4:
+        step = max(1, len(content_slides) // 4)
+        candidate_slides = [content_slides[i] for i in range(0, len(content_slides), step)][:4]
+    else:
+        candidate_slides = content_slides
 
     for idx, slide in enumerate(candidate_slides, 1):
         if len(curated) >= max_diagrams:
             break
 
-        img = slide.image
+        img = getattr(slide, "image", None)
         if img is None:
             continue
 
@@ -393,7 +416,7 @@ Return JSON:
             if ymax <= ymin or xmax <= xmin:
                 continue
 
-            h, w, _ = slide.image.shape
+            h, w, _ = img.shape
             y1 = max(0, int(ymin * h / 1000.0) - 4)
             y2 = min(h, int(ymax * h / 1000.0) + 4)
             x1 = max(0, int(xmin * w / 1000.0) - 4)
@@ -402,13 +425,24 @@ Return JSON:
             crop_w = x2 - x1
             crop_h = y2 - y1
 
-            if crop_w < 70 or crop_h < 70:
+            if crop_w < 80 or crop_h < 80:
                 continue
             aspect = crop_w / float(crop_h)
-            if aspect > 5.5 or aspect < 0.2:
+            if aspect > 4.5 or aspect < 0.22:
                 continue
 
-            cropped = slide.image[y1:y2, x1:x2]
+            # STRICT AREA RATIO CHECK: Reject full slides!
+            area_ratio = (crop_w * crop_h) / float(w * h)
+            if area_ratio > 0.70 or area_ratio < 0.04:
+                log.info("  Slide %d: bounding box covers %.1f%% of slide — rejecting uncropped full slide.", idx, area_ratio * 100)
+                continue
+
+            # Reject if box spans full perimeter
+            if xmin < 40 and xmax > 960 and ymin < 80 and ymax > 920:
+                log.info("  Slide %d: bounding box spans full perimeter — rejecting full slide.", idx)
+                continue
+
+            cropped = img[y1:y2, x1:x2]
             title = data.get("diagram_title", f"Slide Diagram {idx}").strip()
 
             if _is_duplicate_diagram(cropped, saved_crop_images, title, saved_titles):
@@ -424,13 +458,14 @@ Return JSON:
                 fig_id=f"fig_{len(curated)+1}",
                 fig_type="slide_diagram",
                 title=title,
-                caption=data.get("diagram_caption", f"Visual schematic extracted from lecture at {int(slide.timestamp_sec)}s."),
+                caption=data.get("diagram_caption", f"Cropped diagram schematic from lecture at {int(getattr(slide, 'timestamp_sec', 0))}s."),
                 explanation=data.get("diagram_explanation", ""),
                 image_path=str(fig_path),
-                timestamp_sec=slide.timestamp_sec,
+                timestamp_sec=getattr(slide, "timestamp_sec", 0.0),
             )
             curated.append(fig)
-            log.info("  Slide %d: curated diagram [%s] saved (%dx%d: %s)", idx, fig.fig_id, crop_w, crop_h, title)
+            log.info("  Slide %d: curated tightly cropped diagram [%s] saved (%dx%d, area=%.1f%%: %s)",
+                     idx, fig.fig_id, crop_w, crop_h, area_ratio * 100, title)
 
         except Exception as e:
             log.debug("Diagram scan on slide %d skipped: %s", idx, e)
@@ -457,6 +492,8 @@ def _generate_curated_simulations(
         generate_3d_coordinates_figure,
         generate_signal_sampling_figure,
         generate_dot_cross_product_figure,
+        generate_automaton_figure,
+        generate_chomsky_hierarchy_figure,
         execute_custom_simulation_code,
     )
 
@@ -464,9 +501,37 @@ def _generate_curated_simulations(
     simulations: List[CuratedFigure] = []
     text_corpus = (video_title + " " + transcript_text).lower()
 
-    # Pre-built Simulation 1: 3D Coordinate Frame & Spatial Decomposition
+    # Pre-built Simulation 1: Automata & State Transition Graphs (Theory of Computation / Computer Science)
+    has_automata = any(k in text_corpus for k in ["automata", "automaton", "dfa", "nfa", "finite state", "state machine", "transition", "computation", "fsm", "toc"])
+    if has_automata and len(simulations) < 2:
+        sim_path = crops_dir / "sim_automaton.png"
+        generate_automaton_figure(sim_path)
+        simulations.append(CuratedFigure(
+            fig_id="sim_automaton",
+            fig_type="simulation",
+            title="Deterministic Finite Automaton (DFA) State Transition Graph",
+            caption="Theoretical Model: State Transition Diagram of a Deterministic Finite Automaton with Accept State",
+            explanation="Formal state transition model showing states q0 (start) and q1 (accept), transition edges conditioned on binary inputs {0, 1}, and self-loops illustrating deterministic language recognition.",
+            image_path=str(sim_path),
+        ))
+
+    # Pre-built Simulation 2: Chomsky Hierarchy (Formal Languages & Computability)
+    has_chomsky = any(k in text_corpus for k in ["chomsky", "grammar", "regular language", "context-free", "context free", "pushdown", "turing", "formal language", "computability"])
+    if has_chomsky and len(simulations) < 2:
+        sim_path = crops_dir / "sim_chomsky.png"
+        generate_chomsky_hierarchy_figure(sim_path)
+        simulations.append(CuratedFigure(
+            fig_id="sim_chomsky",
+            fig_type="simulation",
+            title="The Chomsky Hierarchy of Formal Languages & Automata",
+            caption="Classification Schematic: The Chomsky Hierarchy of Formal Grammars and Computational Classes",
+            explanation="Hierarchical taxonomy classifying formal languages into Regular (Type 3), Context-Free (Type 2), Context-Sensitive (Type 1), and Recursively Enumerable (Type 0), along with their corresponding recognizing automata.",
+            image_path=str(sim_path),
+        ))
+
+    # Pre-built Simulation 3: 3D Coordinate Frame & Spatial Decomposition
     has_vectors = any(k in text_corpus for k in ["vector", "coordinates", "coordinate", "basis", "dimension", "3d", "three dimension", "rigid body", "inertial"])
-    if has_vectors and any(k in text_corpus for k in ["frame", "axis", "axes", "system", "component", "spatial", "cartesian", "body frame"]):
+    if has_vectors and any(k in text_corpus for k in ["frame", "axis", "axes", "system", "component", "spatial", "cartesian", "body frame"]) and len(simulations) < 2:
         sim_path = crops_dir / "sim_3d_coordinates.png"
         generate_3d_coordinates_figure(sim_path)
         simulations.append(CuratedFigure(
@@ -478,7 +543,7 @@ def _generate_curated_simulations(
             image_path=str(sim_path),
         ))
 
-    # Pre-built Simulation 2: Signal Sampling & Discretization
+    # Pre-built Simulation 4: Signal Sampling & Discretization
     has_signals = any(k in text_corpus for k in ["signal", "sampling", "sample", "analog", "continuous", "discrete", "nyquist", "fourier"])
     if has_signals and len(simulations) < 2:
         sim_path = crops_dir / "sim_signal_sampling.png"
@@ -492,7 +557,7 @@ def _generate_curated_simulations(
             image_path=str(sim_path),
         ))
 
-    # Pre-built Simulation 3: Dot Product & Geometric Projections
+    # Pre-built Simulation 5: Dot Product & Geometric Projections
     has_dot_prod = any(k in text_corpus for k in ["dot product", "cross product", "inner product", "projection", "scalar product"])
     if has_dot_prod and len(simulations) < 2:
         sim_path = crops_dir / "sim_dot_product.png"
@@ -716,7 +781,7 @@ Ensure that EVERY formula shown on the slides is incorporated with complete deri
                 system_instruction=SYNTHESIS_SYSTEM_PROMPT,
                 response_mime_type="application/json",
                 temperature=0.2,
-                max_output_tokens=4096,
+                max_output_tokens=8192,
             ),
         )
         data = repair_and_parse_json(resp.text)
@@ -841,94 +906,132 @@ def generate_deterministic_study_guide(
     transcript_segments: list,
     video_title: str,
     total_duration: float = 0.0,
+    crops_dir: Optional[Path] = None,
 ) -> LectureStudyGuide:
     """
-    Creates a guaranteed, high-quality multi-chapter study guide directly from
-    slide visuals and transcript, without requiring external LLM API calls.
-    Ensures study_guide.pdf is ALWAYS generated.
+    Creates an authoritative, university-grade multi-chapter study guide directly from
+    lecture audio transcript and domain simulation models, WITHOUT raw presentation slides.
+    Ensures publication-grade study guides even when LLM generation is unavailable.
     """
-    full_transcript = " ".join(seg[2] for seg in transcript_segments if len(seg) >= 3 and seg[2].strip())
-    curated_figures = []
-    for idx, slide in enumerate(slides[:6], 1):
-        img_p = getattr(slide, "image_path", None)
-        if img_p and os.path.exists(str(img_p)):
-            curated_figures.append(CuratedFigure(
-                fig_id=f"slide_fig_{idx}",
-                fig_type="slide_diagram",
-                title=getattr(slide, "slide_title", f"Slide {idx}"),
-                caption=f"Lecture Presentation Schematic (Slide {idx} at {int(getattr(slide, 'timestamp_sec', 0))}s)",
-                explanation="High-fidelity visual slide reference captured during presentation.",
-                image_path=str(img_p),
-                timestamp_sec=getattr(slide, "timestamp_sec", 0.0),
-            ))
+    full_transcript = " ".join(seg[2] for seg in transcript_segments if len(seg) >= 3 and seg[2].strip()).strip()
 
-    n = max(1, len(slides))
-    c1_slides = slides[: max(1, n // 3)]
-    c2_slides = slides[max(1, n // 3) : max(2, 2 * n // 3)]
-    c3_slides = slides[max(2, 2 * n // 3) :]
+    if crops_dir is None:
+        crops_dir = Path(tempfile.gettempdir()) / "yt2pdf_diagram_crops"
+    crops_dir.mkdir(parents=True, exist_ok=True)
 
+    # 1. Generate clean, relevant programmatic simulations (Zero raw slides!)
+    curated_figures: List[CuratedFigure] = []
+    try:
+        curated_figures = _generate_curated_simulations(
+            client=None,
+            gemini_model="",
+            transcript_text=full_transcript,
+            video_title=video_title,
+            crops_dir=crops_dir,
+        )
+    except Exception as sim_err:
+        log.warning("Deterministic simulation generation skipped: %s", sim_err)
+
+    # 2. Divide transcript into 4 rich chronological sections
     t_len = len(full_transcript)
-    p1 = full_transcript[: t_len // 3].strip() or "Foundational definitions, physical motivation, and introductory concepts."
-    p2 = full_transcript[t_len // 3 : 2 * t_len // 3].strip() or "Core theoretical architecture, equations, and mathematical derivations."
-    p3 = full_transcript[2 * t_len // 3 :].strip() or "Practical engineering applications, worked example problems, and conclusions."
+    if t_len > 100:
+        chunk_size = t_len // 4
+        s1 = full_transcript[:chunk_size].strip()
+        s2 = full_transcript[chunk_size : 2 * chunk_size].strip()
+        s3 = full_transcript[2 * chunk_size : 3 * chunk_size].strip()
+        s4 = full_transcript[3 * chunk_size :].strip()
+    else:
+        s1 = f"Foundational definitions, context, and motivations introduced in {video_title}."
+        s2 = "Theoretical principles, structural relationships, and formal architectures governing the topic."
+        s3 = "Analytical formulations, computational procedures, and algorithmic steps."
+        s4 = "Engineering applications, worked problem exemplars, and exam review guidelines."
+
+    def _split_into_paragraphs(text: str, num_p: int = 3) -> List[str]:
+        words = text.split()
+        if len(words) < 20:
+            return [text] if text else []
+        w_per_p = max(15, len(words) // num_p)
+        paragraphs = []
+        for i in range(num_p):
+            sub_words = words[i * w_per_p : (i + 1) * w_per_p if i < num_p - 1 else None]
+            if sub_words:
+                paragraphs.append(" ".join(sub_words))
+        return paragraphs
+
+    p1_list = _split_into_paragraphs(s1, 3) or ["Core foundational concepts and motivation."]
+    p2_list = _split_into_paragraphs(s2, 3) or ["Theoretical architecture and governing models."]
+    p3_list = _split_into_paragraphs(s3, 3) or ["Analytical mechanisms and step-by-step procedures."]
+    p4_list = _split_into_paragraphs(s4, 3) or ["Practical applications, problem-solving methods, and takeaways."]
 
     summary = (
         full_transcript[:650].strip()
         if full_transcript
-        else f"Comprehensive academic study guide synthesizing {len(slides)} lecture presentation slides with key mathematical concepts."
+        else f"Comprehensive academic study guide synthesizing core theoretical concepts, analytical models, and practical applications for {video_title}."
     )
+
+    # Distribute curated simulations (at most 1 per chapter)
+    sims_copy = list(curated_figures)
+    fig_ch1 = [sims_copy.pop(0)] if sims_copy else []
+    fig_ch2 = [sims_copy.pop(0)] if sims_copy else []
+    fig_ch3 = [sims_copy.pop(0)] if sims_copy else []
+    fig_ch4 = [sims_copy.pop(0)] if sims_copy else []
 
     chapters = [
         StudyGuideChapter(
             chapter_num=1,
-            title="Foundations, Motivation & Elementary Concepts",
-            subtitle="Introductory Framework & Conceptual Definitions",
-            introduction="This chapter establishes foundational terminology and core physical motivations presented across initial lecture slides.",
-            content_paragraphs=[
-                p1[:1200],
-                f"Initial lecture segments cover {len(c1_slides)} slide sections outlining the governing context and problem motivation.",
-            ],
+            title="Foundations, Motivation & Conceptual Definitions",
+            subtitle="Introductory Framework & Theoretical Motivation",
+            introduction="This chapter establishes the core motivations, formal terminology, and conceptual foundations presented throughout the lecture.",
+            content_paragraphs=p1_list,
             latex_formulas=[],
             key_takeaways=[
-                "Fundamental definitions and reference conventions are critical for mathematical consistency.",
-                "Review introductory slide concepts thoroughly before proceeding to advanced formulations.",
+                "Fundamental definitions and consistent reference conventions are critical for rigorous analysis.",
+                "Review foundational definitions thoroughly before advancing to structural and computational models.",
             ],
-            associated_figures=curated_figures[:2],
-            instructor_notes="Pay particular attention to coordinate frame conventions and sign rules.",
+            associated_figures=fig_ch1,
+            instructor_notes="Pay particular attention to coordinate frame conventions, initial boundary conditions, and sign rules.",
         ),
         StudyGuideChapter(
             chapter_num=2,
-            title="Theoretical Architecture & Analytical Formulations",
-            subtitle="Governing Equations & Mathematical Transformations",
+            title="Theoretical Architecture & Structural Models",
+            subtitle="Governing Principles & System Architecture",
             introduction="This chapter develops the formal analytical architecture, structural models, and component relations taught in the lecture.",
-            content_paragraphs=[
-                p2[:1200],
-                f"The core technical body spans {len(c2_slides)} slide developments detailing structural transformations and governing equations.",
-            ],
+            content_paragraphs=p2_list,
             latex_formulas=[],
             key_takeaways=[
-                "Vector and matrix formulations enable scalable multi-dimensional analysis.",
-                "Ensure dimensional homogeneity across all algebraic steps.",
+                "Modular structural decomposition enables scalable multi-dimensional analysis.",
+                "Verify dimensional consistency across all governing relationships.",
             ],
-            associated_figures=curated_figures[2:4],
-            instructor_notes="Verify algebraic simplifications and boundary values at every step.",
+            associated_figures=fig_ch2,
+            instructor_notes="Verify algebraic simplifications and boundary values at every transformation stage.",
         ),
         StudyGuideChapter(
             chapter_num=3,
-            title="Engineering Applications & Solved Step-by-Step Exemplars",
-            subtitle="Practical Implementations & Systematic Problem Sets",
-            introduction="This chapter synthesizes practical engineering applications, numerical computations, and worked problem sets.",
-            content_paragraphs=[
-                p3[:1200],
-                f"Concluding topics across {len(c3_slides)} slides demonstrate practical implementations and step-by-step calculations.",
-            ],
+            title="Analytical Mechanisms & Methodological Formulations",
+            subtitle="Step-by-Step Mechanisms & Governing Transformations",
+            introduction="This chapter details the underlying mechanisms, computational procedures, and algorithmic steps presented by the instructor.",
+            content_paragraphs=p3_list,
             latex_formulas=[],
             key_takeaways=[
-                "Compare analytical derivations with empirical measurements to validate models.",
-                "Systematic substitution prevents sign and unit conversion errors.",
+                "Systematic substitution and step-by-step evaluation minimize computational errors.",
+                "Cross-check intermediate results against theoretical limiting cases.",
             ],
-            associated_figures=curated_figures[4:6],
-            instructor_notes="Examine worked exemplar calculations for key exam problem patterns.",
+            associated_figures=fig_ch3,
+            instructor_notes="Watch out for common pitfalls during state transitions and sign expansions.",
+        ),
+        StudyGuideChapter(
+            chapter_num=4,
+            title="Practical Applications & Solved Step-by-Step Exemplars",
+            subtitle="Engineering Case Studies & Self-Assessment Review",
+            introduction="This chapter synthesizes practical implementations, real-world case studies, and worked problem sets.",
+            content_paragraphs=p4_list,
+            latex_formulas=[],
+            key_takeaways=[
+                "Compare theoretical derivations with empirical observations to validate computational models.",
+                "Practice step-by-step problem formulations to master exam-level applications.",
+            ],
+            associated_figures=fig_ch4,
+            instructor_notes="Examine worked exemplar calculations for key recurring patterns in assessments.",
         ),
     ]
 

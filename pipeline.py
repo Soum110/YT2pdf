@@ -594,6 +594,10 @@ def run_pipeline(job_id: str, video_url: str, jobs_root: Path, gemini_api_key: s
             from transcript_fetcher import fetch_transcript
             transcript_segments = fetch_transcript(video_url, tmp_dir=transcript_tmp)
             log.info("[%s] Got %d transcript segments", job_id, len(transcript_segments))
+            try:
+                (job_dir / "transcript.json").write_text(json.dumps(transcript_segments, ensure_ascii=False), encoding="utf-8")
+            except Exception as tr_save_err:
+                log.warning("[%s] Failed to write transcript.json: %s", job_id, tr_save_err)
         except Exception as e:
             log.warning("[%s] Transcript fetch failed (will use image-only): %s", job_id, e)
             transcript_segments = []
@@ -661,6 +665,7 @@ def run_pipeline(job_id: str, video_url: str, jobs_root: Path, gemini_api_key: s
                     transcript_segments=transcript_segments,
                     video_title=video_title,
                     total_duration=float(duration),
+                    crops_dir=crops_dir,
                 )
                 guide_pdf_path = job_dir / "study_guide.pdf"
                 build_study_guide_pdf(
@@ -841,6 +846,14 @@ def run_pipeline_from_frames(
                 log.warning("[%s] Server transcript fetch failed: %s", job_id, tr_err)
                 transcript_segments = []
 
+        try:
+            (job_dir / "transcript.json").write_text(json.dumps(transcript_segments, ensure_ascii=False), encoding="utf-8")
+        except Exception as tr_save_err:
+            log.warning("[%s] Failed to write transcript.json: %s", job_id, tr_save_err)
+
+        crops_dir = job_dir / "diagram_crops"
+        crops_dir.mkdir(parents=True, exist_ok=True)
+
         if gemini_api_key and gemini_api_key != "YOUR_GEMINI_API_KEY_HERE":
             try:
                 if transcript_segments:
@@ -851,8 +864,6 @@ def run_pipeline_from_frames(
                     _write_status(job_dir, "generating_guide", 88, f"AI synthesizing study guide from slide formulas & diagrams ({len(verified)} slides)...")
 
                 from study_guide_generator import generate_study_guide_content
-                crops_dir = job_dir / "diagram_crops"
-                crops_dir.mkdir(parents=True, exist_ok=True)
                 study_guide = generate_study_guide_content(
                     slides=verified,
                     transcript_segments=transcript_segments,
@@ -883,6 +894,7 @@ def run_pipeline_from_frames(
                     transcript_segments=transcript_segments,
                     video_title=video_title,
                     total_duration=float(duration),
+                    crops_dir=crops_dir,
                 )
                 guide_pdf_path = job_dir / "study_guide.pdf"
                 build_study_guide_pdf(

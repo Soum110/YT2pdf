@@ -406,13 +406,12 @@ async def download_guide_pdf(job_id: str):
     meta_file = JOBS_ROOT / job_id / "meta.json"
 
     # Guaranteed On-Demand Generation: If study_guide.pdf is missing or was corrupted,
-    # generate it on the fly in 1-2 seconds using verified slides and deterministic compilation!
+    # generate it on the fly using Gemini AI (if key available) or deterministic simulation compilation!
     if (not pdf_path.exists() or pdf_path.stat().st_size < 500) and slides_dir.exists():
         slide_files = sorted(slides_dir.glob("slide_*.png"))
         if slide_files:
             try:
                 import json, re
-                from study_guide_generator import generate_deterministic_study_guide
                 from pdf_study_guide import build_study_guide_pdf
                 from slide_extractor import VerifiedSlide
 
@@ -425,6 +424,17 @@ async def download_guide_pdf(job_id: str):
                         duration = float(mdata.get("duration", 0.0))
                     except Exception:
                         pass
+
+                transcript_file = JOBS_ROOT / job_id / "transcript.json"
+                transcript_segments = []
+                if transcript_file.exists():
+                    try:
+                        transcript_segments = json.loads(transcript_file.read_text(encoding="utf-8"))
+                    except Exception as tr_err:
+                        log.warning("[%s] Failed to read transcript.json: %s", job_id, tr_err)
+
+                crops_dir = JOBS_ROOT / job_id / "diagram_crops"
+                crops_dir.mkdir(parents=True, exist_ok=True)
 
                 verified = []
                 for idx, sf in enumerate(slide_files, 1):
@@ -442,14 +452,35 @@ async def download_guide_pdf(job_id: str):
                         )
                     )
 
-                det_guide = generate_deterministic_study_guide(
-                    slides=verified,
-                    transcript_segments=[],
-                    video_title=video_title,
-                    total_duration=duration,
-                )
+                guide_obj = None
+                if GEMINI_API_KEY and GEMINI_API_KEY != "YOUR_GEMINI_API_KEY_HERE":
+                    try:
+                        log.info("[%s] Attempting AI Gemini study guide generation on-demand...", job_id)
+                        from study_guide_generator import generate_study_guide_content
+                        guide_obj = generate_study_guide_content(
+                            slides=verified,
+                            transcript_segments=transcript_segments,
+                            total_duration=duration,
+                            gemini_api_key=GEMINI_API_KEY,
+                            crops_dir=crops_dir,
+                            gemini_model="gemini-2.0-flash",
+                        )
+                    except Exception as ai_err:
+                        log.warning("[%s] On-demand AI study guide failed, falling back to deterministic: %s", job_id, ai_err)
+                        guide_obj = None
+
+                if guide_obj is None:
+                    from study_guide_generator import generate_deterministic_study_guide
+                    guide_obj = generate_deterministic_study_guide(
+                        slides=verified,
+                        transcript_segments=transcript_segments,
+                        video_title=video_title,
+                        total_duration=duration,
+                        crops_dir=crops_dir,
+                    )
+
                 build_study_guide_pdf(
-                    study_guide=det_guide,
+                    study_guide=guide_obj,
                     output_path=pdf_path,
                     video_title=video_title,
                 )
