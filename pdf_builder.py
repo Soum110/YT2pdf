@@ -65,6 +65,8 @@ def build_pdf(
 ) -> Path:
     """
     Stitch a list of PNG slide images into a single PDF file.
+    Streams images page-by-page to keep RAM usage constant (< 20MB),
+    preventing Out-Of-Memory crashes even for hundreds of slides from multi-hour lectures.
 
     Args:
         image_paths:   Ordered list of PNG file paths.
@@ -80,15 +82,67 @@ def build_pdf(
         raise ValueError("No slide images provided to build_pdf.")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_cover_path = None
 
+    # 1. Try high-performance, low-RAM streaming via fpdf2
+    try:
+        from fpdf import FPDF
+
+        # Inspect first image to determine target aspect ratio / dimensions
+        first_img = Image.open(image_paths[0])
+        w_px, h_px = first_img.size
+        first_img.close()
+
+        # Target dimensions in pt (standard 16:9 1280x720 or native)
+        page_w = 1280
+        page_h = int(1280 * (h_px / w_px)) if w_px > 0 else 720
+        orientation = "L" if page_w >= page_h else "P"
+
+        pdf = FPDF(orientation=orientation, unit="pt", format=(page_h, page_w) if orientation == "L" else (page_w, page_h))
+        pdf.set_auto_page_break(False)
+
+        total_pages = 0
+
+        # --- Cover page ---
+        if include_cover:
+            try:
+                cover = _make_cover_page(slide_titles, video_title, width=page_w, height=page_h)
+                temp_cover_path = output_path.parent / f"_cover_tmp_{output_path.stem}.jpg"
+                cover.save(str(temp_cover_path), format="JPEG", quality=90)
+                pdf.add_page()
+                pdf.image(str(temp_cover_path), x=0, y=0, w=page_w, h=page_h)
+                total_pages += 1
+            except Exception as cover_err:
+                log.warning("Could not generate cover page with fpdf2: %s", cover_err)
+
+        # --- Slide pages streamed one by one ---
+        for img_path in image_paths:
+            pdf.add_page()
+            pdf.image(str(img_path), x=0, y=0, w=page_w, h=page_h)
+            total_pages += 1
+
+        pdf.output(str(output_path))
+        log.info("PDF saved via FPDF2 streaming: %s (%d pages)", output_path, total_pages)
+        return output_path
+
+    except Exception as fpdf_err:
+        log.warning("FPDF2 compilation encountered an issue (%s), falling back to Pillow...", fpdf_err)
+    finally:
+        if temp_cover_path and temp_cover_path.exists():
+            try:
+                temp_cover_path.unlink()
+            except Exception:
+                pass
+
+    # 2. Fallback: Pillow compilation
     pages: list[Image.Image] = []
-
-    # --- Cover page ---
     if include_cover:
-        cover = _make_cover_page(slide_titles, video_title)
-        pages.append(cover.convert("RGB"))
+        try:
+            cover = _make_cover_page(slide_titles, video_title)
+            pages.append(cover.convert("RGB"))
+        except Exception:
+            pass
 
-    # --- Slide pages ---
     for img_path in image_paths:
         img = Image.open(img_path).convert("RGB")
         pages.append(img)
@@ -96,7 +150,6 @@ def build_pdf(
     if not pages:
         raise ValueError("No pages to save.")
 
-    # Save as PDF (first page saves, rest appended)
     first, rest = pages[0], pages[1:]
     first.save(
         str(output_path),
@@ -105,6 +158,5 @@ def build_pdf(
         append_images=rest,
         resolution=150,
     )
-
-    log.info("PDF saved: %s  (%d pages)", output_path, len(pages))
+    log.info("PDF saved via Pillow fallback: %s (%d pages)", output_path, len(pages))
     return output_path

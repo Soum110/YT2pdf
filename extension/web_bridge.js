@@ -121,14 +121,14 @@
       return;
     }
 
-    // Generous 180s (3-minute) timeout watchdog so large videos never time out prematurely
+    // Generous watchdog timeout: initial 600s (10 min) for startup, and automatically refreshed on progress
     extractorWatchdog = setTimeout(() => {
-      console.warn("[YT2PDF Bridge] Extraction watchdog timed out after 180s.");
+      console.warn("[YT2PDF Bridge] Extraction watchdog timed out.");
       dispatchResult({
         success: false,
-        error: "Slide extraction timed out after 3 minutes. Please check that the YouTube video is publicly accessible and try again."
+        error: "Slide extraction timed out. Please check that the YouTube video is publicly accessible and try again."
       });
-    }, 180000);
+    }, 600000);
 
     try {
       const embedUrl = `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&enablejsapi=1&yt2pdf_headless=1`;
@@ -159,6 +159,16 @@
   if (typeof chrome !== "undefined" && chrome?.runtime?.onMessage) {
     chrome.runtime.onMessage.addListener((msg) => {
       if (msg.action === "extraction_progress_update") {
+        if (extractorWatchdog) {
+          clearTimeout(extractorWatchdog);
+          extractorWatchdog = setTimeout(() => {
+            console.warn("[YT2PDF Bridge] Extraction stalled with no progress for 3 minutes.");
+            dispatchResult({
+              success: false,
+              error: "Slide extraction stalled. Please try again."
+            });
+          }, 180000);
+        }
         window.dispatchEvent(new CustomEvent("YT2PDF_EXTRACTION_PROGRESS", {
           detail: { current: msg.current, total: msg.total }
         }));
@@ -184,6 +194,16 @@
   // Listen for window postMessages from the silent iframe or webpage
   window.addEventListener("message", (event) => {
     if (event.data?.type === "YT2PDF_HEADLESS_PROGRESS") {
+      if (extractorWatchdog) {
+        clearTimeout(extractorWatchdog);
+        extractorWatchdog = setTimeout(() => {
+          console.warn("[YT2PDF Bridge] Extraction stalled with no progress for 3 minutes.");
+          dispatchResult({
+            success: false,
+            error: "Slide extraction stalled. Please try again."
+          });
+        }, 180000);
+      }
       window.dispatchEvent(new CustomEvent("YT2PDF_EXTRACTION_PROGRESS", {
         detail: { current: event.data.current, total: event.data.total }
       }));

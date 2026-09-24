@@ -54,6 +54,12 @@ app.add_middleware(
 ALLOWED_HOSTS = {"yt2pdfs.com", "www.yt2pdfs.com", "localhost", "127.0.0.1", "testserver"}
 
 
+def _format_timestamp(ts: int) -> str:
+    hrs, rem = divmod(int(ts or 0), 3600)
+    mins, secs = divmod(rem, 60)
+    return f"{hrs:d}:{mins:02d}:{secs:02d}" if hrs > 0 else f"{mins:02d}:{secs:02d}"
+
+
 @app.middleware("http")
 async def domain_restriction_middleware(request: Request, call_next):
     # Determine effective host from reverse proxy or direct request
@@ -358,8 +364,8 @@ async def download_slides_pdf(job_id: str):
                 for idx, sf in enumerate(slide_files, 1):
                     m = re.search(r"t(\d+)s", sf.name)
                     ts = int(m.group(1)) if m else 0
-                    mins, secs = divmod(ts, 60)
-                    titles.append(f"Slide ({mins:02d}:{secs:02d})")
+                    time_str = _format_timestamp(ts)
+                    titles.append(f"Slide ({time_str})")
                 build_pdf(
                     image_paths=slide_files,
                     slide_titles=titles,
@@ -445,8 +451,7 @@ async def list_job_slides(job_id: str):
     for idx, f in enumerate(files, 1):
         m = re.search(r"t(\d+)s", f.name)
         ts = int(m.group(1)) if m else 0
-        mins, secs = divmod(ts, 60)
-        time_str = f"{mins:02d}:{secs:02d}"
+        time_str = _format_timestamp(ts)
         slide_list.append({
             "index": idx,
             "filename": f.name,
@@ -494,8 +499,8 @@ async def rebuild_slides_pdf(job_id: str, req: RebuildSlidesRequest):
             valid_paths.append(p)
             m = re.search(r"t(\d+)s", safe_name)
             ts = int(m.group(1)) if m else 0
-            mins, secs = divmod(ts, 60)
-            titles.append(f"Slide ({mins:02d}:{secs:02d})")
+            time_str = _format_timestamp(ts)
+            titles.append(f"Slide ({time_str})")
 
     if not valid_paths:
         raise HTTPException(status_code=400, detail="None of the selected slide files exist on disk.")

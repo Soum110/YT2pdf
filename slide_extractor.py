@@ -52,7 +52,7 @@ class ExtractorConfig:
     """All tunable parameters in one place."""
 
     # --- Pass 1: OpenCV ---
-    sample_fps: int = 1                  # Sample 1 frame per second
+    sample_fps: float = 1.0              # Sample rate (can be fractional, e.g. 0.2 for 1 frame every 5s)
     ssim_threshold: float = 0.94         # Sensitive threshold to capture slide text/diagram changes
     debounce_seconds: int = 2            # Ignore frames for N seconds after a transition
 

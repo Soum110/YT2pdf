@@ -112,6 +112,17 @@
     };
   }
 
+  function formatTimestamp(sec) {
+    const s = Math.max(0, Math.floor(sec || 0));
+    if (s >= 3600) {
+      const h = Math.floor(s / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      const rem = s % 60;
+      return `${h}:${String(m).padStart(2, "0")}:${String(rem).padStart(2, "0")}`;
+    }
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  }
+
   // ─────────────────────────────────────────────
   // Client-Side YouTube Caption / Transcript Extraction
   // ─────────────────────────────────────────────
@@ -671,7 +682,10 @@
       }
 
       let step = 8;
-      if (duration > 3600) step = 14;      // > 1 hr
+      if (duration > 43200) step = 120;     // > 12 hrs: sample every 2m (~360-450 points)
+      else if (duration > 21600) step = 75; // 6-12 hrs: sample every 75s (~280-450 points)
+      else if (duration > 10800) step = 45; // 3-6 hrs: sample every 45s (~240-480 points)
+      else if (duration > 3600) step = 20;  // 1-3 hrs: sample every 20s (~180-450 points)
       else if (duration > 1800) step = 10; // 30-60 mins (every 10s: ~190 checks for 32m)
       else if (duration > 600) step = 8;   // 10-30 mins
       else step = 5;                       // < 10 mins
@@ -756,7 +770,7 @@
           captureCtx.drawImage(video, 0, 0, 1280, 720);
           capturedSlides.push({
             timestamp: timeTarget,
-            time_formatted: `${Math.floor(timeTarget / 60)}:${String(timeTarget % 60).padStart(2, "0")}`,
+            time_formatted: formatTimestamp(timeTarget),
             data: captureCanvas.toDataURL("image/jpeg", 0.76)
           });
         }
@@ -765,11 +779,12 @@
       // Timeline Gap & End-of-Lecture Safety Net:
       // Ensure no slides are skipped in long gaps (> 90s) or missed at the end of the video
       const gaps = [];
+      const gapThreshold = Math.max(90, Math.floor(step * 2.5));
       if (capturedSlides.length > 0 && duration > 60) {
         for (let idx = 0; idx < capturedSlides.length - 1; idx++) {
           const tA = capturedSlides[idx].timestamp;
           const tB = capturedSlides[idx + 1].timestamp;
-          if (tB - tA > 90) {
+          if (tB - tA > gapThreshold) {
             gaps.push(Math.floor((tA + tB) / 2));
           }
         }
@@ -783,7 +798,7 @@
       if (gaps.length > 0 || (capturedSlides.length < 6 && duration > 60)) {
         console.log(`[YT2PDF Companion] Filling ${gaps.length} timeline gaps across lecture...`);
         const existingTs = new Set(capturedSlides.map(s => Math.floor(s.timestamp)));
-        const chkPoints = gaps.length > 0 ? gaps : finalPoints.filter((_, idx) => idx % Math.max(1, Math.floor(finalPoints.length / 12)) === 0);
+        const chkPoints = gaps.length > 0 ? gaps.slice(0, 60) : finalPoints.filter((_, idx) => idx % Math.max(1, Math.floor(finalPoints.length / 12)) === 0);
         for (const tPoint of chkPoints) {
           if (![...existingTs].some(ts => Math.abs(ts - tPoint) < 14)) {
             try {
@@ -792,7 +807,7 @@
               captureCtx.drawImage(video, 0, 0, 1280, 720);
               capturedSlides.push({
                 timestamp: tPoint,
-                time_formatted: `${Math.floor(tPoint / 60)}:${String(tPoint % 60).padStart(2, "0")}`,
+                time_formatted: formatTimestamp(tPoint),
                 data: captureCanvas.toDataURL("image/jpeg", 0.76)
               });
               existingTs.add(Math.floor(tPoint));
@@ -926,7 +941,10 @@
 
       // Smart sample intervals based on video duration to catch all slide changes
       let step = 8;
-      if (duration > 3600) step = 14;      // > 1 hr
+      if (duration > 43200) step = 120;     // > 12 hrs: sample every 2m (~360-450 points)
+      else if (duration > 21600) step = 75; // 6-12 hrs: sample every 75s (~280-450 points)
+      else if (duration > 10800) step = 45; // 3-6 hrs: sample every 45s (~240-480 points)
+      else if (duration > 3600) step = 20;  // 1-3 hrs: sample every 20s (~180-450 points)
       else if (duration > 1800) step = 10; // 30-60 mins (every 10s checks for 32m)
       else if (duration > 600) step = 8;   // 10-30 mins
       else step = 5;                       // < 10 mins
@@ -1011,7 +1029,7 @@
 
           capturedSlides.push({
             timestamp: timeTarget,
-            time_formatted: `${Math.floor(timeTarget / 60)}:${String(timeTarget % 60).padStart(2, "0")}`,
+            time_formatted: formatTimestamp(timeTarget),
             data: base64Data
           });
         }
@@ -1020,11 +1038,12 @@
       // Timeline Gap & End-of-Lecture Safety Net:
       // Ensure no slides are skipped in long gaps (> 90s) or missed at the end of the video
       const gaps = [];
+      const gapThreshold = Math.max(90, Math.floor(step * 2.5));
       if (capturedSlides.length > 0 && duration > 60) {
         for (let idx = 0; idx < capturedSlides.length - 1; idx++) {
           const tA = capturedSlides[idx].timestamp;
           const tB = capturedSlides[idx + 1].timestamp;
-          if (tB - tA > 90) {
+          if (tB - tA > gapThreshold) {
             gaps.push(Math.floor((tA + tB) / 2));
           }
         }
@@ -1038,7 +1057,7 @@
       if (gaps.length > 0 || (capturedSlides.length < 6 && duration > 60)) {
         console.log(`[YT2PDF Companion] Filling ${gaps.length} timeline gaps across lecture...`);
         const existingTs = new Set(capturedSlides.map(s => Math.floor(s.timestamp)));
-        const chkPoints = gaps.length > 0 ? gaps : finalPoints.filter((_, idx) => idx % Math.max(1, Math.floor(finalPoints.length / 12)) === 0);
+        const chkPoints = gaps.length > 0 ? gaps.slice(0, 60) : finalPoints.filter((_, idx) => idx % Math.max(1, Math.floor(finalPoints.length / 12)) === 0);
         for (const tPoint of chkPoints) {
           if (![...existingTs].some(ts => Math.abs(ts - tPoint) < 14)) {
             try {
@@ -1047,7 +1066,7 @@
               captureCtx.drawImage(video, 0, 0, 1280, 720);
               capturedSlides.push({
                 timestamp: tPoint,
-                time_formatted: `${Math.floor(tPoint / 60)}:${String(tPoint % 60).padStart(2, "0")}`,
+                time_formatted: formatTimestamp(tPoint),
                 data: captureCanvas.toDataURL("image/jpeg", 0.78)
               });
               existingTs.add(Math.floor(tPoint));

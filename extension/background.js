@@ -165,13 +165,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // IMMEDIATELY mute the tab at the browser level
       chrome.tabs.update(tabId, { muted: true }).catch(() => {});
 
-      // Generous 180s (3 min) watchdog so longer videos never time out prematurely
+      // Generous watchdog timeout: initial 600s (10 min) for startup, and automatically refreshed on progress
       const timeout = setTimeout(() => {
-        console.warn(`[YT2PDF Background] Extraction tab ${tabId} timed out after 180s.`);
-        cleanupExtraction(tabId, "Slide extraction timed out after 3 minutes. Please ensure the video is publicly accessible and try again.");
-      }, 180000);
+        console.warn(`[YT2PDF Background] Extraction tab ${tabId} timed out.`);
+        cleanupExtraction(tabId, "Slide extraction timed out. Please ensure the video is publicly accessible and try again.");
+      }, 600000);
 
       activeExtractions.set(tabId, {
+        tabId,
         sendResponse,
         timeout,
         originTabId,
@@ -182,19 +183,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; // Keep channel open for async response
   }
 
-  // 2. Real-time progress update forwarding
+  // 2. Real-time progress update forwarding & watchdog keepalive
   if (message.action === "headless_progress") {
     const tabId = sender.tab?.id;
     let pending = (tabId && activeExtractions.has(tabId)) ? activeExtractions.get(tabId) : null;
     if (!pending && activeExtractions.size > 0) {
       pending = activeExtractions.values().next().value;
     }
-    if (pending && pending.originTabId) {
-      chrome.tabs.sendMessage(pending.originTabId, {
-        action: "extraction_progress_update",
-        current: message.current,
-        total: message.total
-      }).catch(() => {});
+    if (pending) {
+      // Keep extraction alive on active progress: reset watchdog so long/multi-hour videos never time out
+      if (pending.timeout) {
+        clearTimeout(pending.timeout);
+        const targetTabId = pending.tabId || tabId;
+        pending.timeout = setTimeout(() => {
+          console.warn(`[YT2PDF Background] Extraction tab ${targetTabId} stalled with no progress for 3 minutes.`);
+          cleanupExtraction(targetTabId, "Slide extraction stalled. Please try again.");
+        }, 180000);
+      }
+      if (pending.originTabId) {
+        chrome.tabs.sendMessage(pending.originTabId, {
+          action: "extraction_progress_update",
+          current: message.current,
+          total: message.total
+        }).catch(() => {});
+      }
     }
     return false;
   }

@@ -376,14 +376,28 @@ def _get_video_info(url: str) -> dict:
     raise RuntimeError(f"Could not fetch video info from YouTube: {'; '.join(all_errors)}")
 
 
-def _download_video(url: str, output_path: str, progress_hook: Optional[Callable] = None) -> str:
+def _download_video(
+    url: str,
+    output_path: str,
+    progress_hook: Optional[Callable] = None,
+    duration: Optional[float] = None,
+) -> str:
     """Download video to output_path using yt-dlp with fail-fast timeouts."""
     import yt_dlp
     import concurrent.futures
 
     video_id = _extract_video_id(url)
     hooks = [progress_hook] if progress_hook else []
-    format_str = "bestvideo[height<=720]/best[height<=720]/bestvideo/best"
+
+    # For multi-hour lectures (> 2 hrs), use 480p to conserve memory & disk bandwidth
+    # For standard lectures (<= 2 hrs), retain high quality 720p
+    if duration and duration > 7200:
+        format_str = "bestvideo[height<=480]/best[height<=480]/bestvideo[height<=720]/best[height<=720]/best"
+    else:
+        format_str = "bestvideo[height<=720]/best[height<=720]/bestvideo/best"
+
+    # Scale download timeout gracefully with lecture duration (up to 30 mins)
+    dl_timeout = max(300, min(1800, int(duration * 0.4))) if (duration and duration > 0) else 300
 
     last_err = None
     variants = _build_ydl_opts_base({
@@ -406,7 +420,7 @@ def _download_video(url: str, output_path: str, progress_hook: Optional[Callable
                     ydl.download([url])
 
             fut = ex.submit(_do_dl)
-            fut.result(timeout=240)  # Max 240 seconds (4 min) for complete video download
+            fut.result(timeout=dl_timeout)
 
             candidates = list(Path(output_path).parent.glob(Path(output_path).stem + "*"))
             mp4s = [c for c in candidates if str(c).endswith(".mp4")]
@@ -490,7 +504,7 @@ def run_pipeline(job_id: str, video_url: str, jobs_root: Path, gemini_api_key: s
                                   f"Downloading... {speed} (ETA: {eta})")
 
         try:
-            video_path = _download_video(video_url, video_out, progress_hook=ytdlp_hook)
+            video_path = _download_video(video_url, video_out, progress_hook=ytdlp_hook, duration=duration)
         except Exception as e:
             raise RuntimeError(f"Download failed: {e}") from e
 
@@ -500,8 +514,19 @@ def run_pipeline(job_id: str, video_url: str, jobs_root: Path, gemini_api_key: s
         # ── Step 3: CV Pass (OpenCV SSIM) ─────────────────────────────────
         from slide_extractor import ExtractorConfig, pass1_find_candidates, save_candidates_debug
 
+        # Adapt sample_fps for long videos so CV scanning completes swiftly without excessive memory
+        sample_fps = 1.0
+        if duration > 21600:       # > 6 hours: sample every 10s
+            sample_fps = 0.1
+        elif duration > 7200:      # 2-6 hours: sample every 5s
+            sample_fps = 0.2
+        elif duration > 3600:      # 1-2 hours: sample every 2s
+            sample_fps = 0.5
+        else:                      # <= 1 hour (standard lectures, completely unchanged)
+            sample_fps = 1.0
+
         config = ExtractorConfig(
-            sample_fps=1,
+            sample_fps=sample_fps,
             ssim_threshold=0.94,
             debounce_seconds=2,
             gemini_api_key=gemini_api_key,
@@ -525,9 +550,13 @@ def run_pipeline(job_id: str, video_url: str, jobs_root: Path, gemini_api_key: s
         def p1_cb(frame_count, total, ts):
             cv_progress["count"] = frame_count
             pct = 43 + int((frame_count / total) * 20)  # 43-63%
-            mins, secs = divmod(int(ts), 60)
+            total_sec = int(ts)
+            hrs = total_sec // 3600
+            mins = (total_sec % 3600) // 60
+            secs = total_sec % 60
+            time_str = f"{hrs:d}:{mins:02d}:{secs:02d}" if hrs > 0 else f"{mins:02d}:{secs:02d}"
             _write_status(job_dir, "cv_scanning", min(pct, 63),
-                          f"Scanning frames... {frame_count}/{total} @ {mins:02d}:{secs:02d}")
+                          f"Scanning frames... {frame_count}/{total} @ {time_str}")
 
         candidates = pass1_find_candidates(video_path, config, progress_cb=p1_cb)
         log.info("[%s] Pass 1 complete: %d candidates", job_id, len(candidates))
@@ -706,12 +735,16 @@ def run_pipeline_from_frames(
         if not verified:
             log.info("[%s] Using all %d candidate frames as slides", job_id, len(candidates))
             for idx, c in enumerate(candidates, 1):
-                mins, secs = divmod(int(c.timestamp_sec), 60)
+                total_sec = int(c.timestamp_sec)
+                hrs = total_sec // 3600
+                mins = (total_sec % 3600) // 60
+                secs = total_sec % 60
+                time_str = f"{hrs:d}:{mins:02d}:{secs:02d}" if hrs > 0 else f"{mins:02d}:{secs:02d}"
                 verified.append(VerifiedSlide(
                     frame_index=c.frame_index,
                     timestamp_sec=c.timestamp_sec,
                     image_or_path=c.image_path,
-                    slide_title=f"Slide {idx} ({mins:02d}:{secs:02d})",
+                    slide_title=f"Slide {idx} ({time_str})",
                     is_slide=True,
                     is_new_content=True,
                 ))
