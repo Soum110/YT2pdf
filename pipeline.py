@@ -669,7 +669,7 @@ def run_pipeline(job_id: str, video_url: str, jobs_root: Path, gemini_api_key: s
                     output_path=guide_pdf_path,
                     video_title=video_title,
                 )
-                guide_ready = guide_pdf_path.exists() and guide_pdf_path.stat().st_size > 500
+                guide_ready = guide_pdf_path.exists() and guide_pdf_path.stat().st_size > 1500
                 log.info("[%s] Study guide PDF ready: %s (size: %d bytes)", job_id, guide_ready, guide_pdf_path.stat().st_size if guide_pdf_path.exists() else 0)
             except Exception as guide_err:
                 log.warning("[%s] Study guide synthesis error: %s", job_id, guide_err)
@@ -691,7 +691,7 @@ def run_pipeline(job_id: str, video_url: str, jobs_root: Path, gemini_api_key: s
                     output_path=guide_pdf_path,
                     video_title=video_title,
                 )
-                guide_ready = guide_pdf_path.exists() and guide_pdf_path.stat().st_size > 500
+                guide_ready = guide_pdf_path.exists() and guide_pdf_path.stat().st_size > 1500
             except Exception as det_err:
                 log.warning("[%s] Fallback study guide compilation error: %s", job_id, det_err)
 
@@ -891,7 +891,7 @@ def run_pipeline_from_frames(
                     output_path=guide_pdf_path,
                     video_title=video_title,
                 )
-                guide_ready = guide_pdf_path.exists() and guide_pdf_path.stat().st_size > 500
+                guide_ready = guide_pdf_path.exists() and guide_pdf_path.stat().st_size > 1500
                 log.info("[%s] Companion study guide PDF ready: %s (size: %d bytes)", job_id, guide_ready, guide_pdf_path.stat().st_size if guide_pdf_path.exists() else 0)
             except Exception as guide_err:
                 log.warning("[%s] Companion study guide generation failed: %s", job_id, guide_err)
@@ -913,7 +913,7 @@ def run_pipeline_from_frames(
                     output_path=guide_pdf_path,
                     video_title=video_title,
                 )
-                guide_ready = guide_pdf_path.exists() and guide_pdf_path.stat().st_size > 500
+                guide_ready = guide_pdf_path.exists() and guide_pdf_path.stat().st_size > 1500
             except Exception as det_err:
                 log.warning("[%s] Companion fallback study guide failed: %s", job_id, det_err)
 

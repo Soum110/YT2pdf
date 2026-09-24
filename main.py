@@ -408,7 +408,7 @@ async def download_slides_pdf(job_id: str):
 async def download_guide_pdf(job_id: str):
     """Download the AI comprehensive study guide PDF."""
     pdf_path = JOBS_ROOT / job_id / "study_guide.pdf"
-    if not pdf_path.exists() or pdf_path.stat().st_size < 100:
+    if not pdf_path.exists() or pdf_path.stat().st_size < 1500:
         raise HTTPException(status_code=404, detail="Study guide PDF not ready yet or job not found.")
 
     import json
@@ -445,7 +445,7 @@ async def get_outputs(job_id: str):
     import json
     slides_dir = JOBS_ROOT / job_id / "slides"
     has_slides = slides_dir.exists() and any(slides_dir.glob("slide_*.png"))
-    has_guide_pdf = (JOBS_ROOT / job_id / "study_guide.pdf").exists() and (JOBS_ROOT / job_id / "study_guide.pdf").stat().st_size > 100
+    has_guide_pdf = (JOBS_ROOT / job_id / "study_guide.pdf").exists() and (JOBS_ROOT / job_id / "study_guide.pdf").stat().st_size > 1500
 
     outputs_file = JOBS_ROOT / job_id / "outputs.json"
     if outputs_file.exists():

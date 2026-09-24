@@ -187,17 +187,7 @@ def _build_html(study_guide, video_title: str) -> str:
   <meta charset="UTF-8">
   <title>{display_title} — Comprehensive Study Guide</title>
   
-  <!-- KaTeX for High-Resolution Math Rendering -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
-  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"
-    onload="renderMathInElement(document.body, {{
-      delimiters: [
-        {{left: '$$', right: '$$', display: true}},
-        {{left: '$', right: '$', display: false}}
-      ],
-      throwOnError: false
-    }});"></script>
+  <!-- Offline-safe self-contained high-resolution styling -->
 
   <style>
     @page {{
@@ -506,9 +496,13 @@ def _build_html(study_guide, video_title: str) -> str:
       break-inside: avoid;
     }}
     .latex-eq {{
-      font-size: 12pt;
+      font-family: "Cambria Math", "STIX Two Math", "Latin Modern Math", "DejaVu Serif", "Times New Roman", serif;
+      font-size: 13pt;
+      font-style: italic;
+      color: #1e3a8a;
       margin: 6px 0;
       overflow-x: auto;
+      letter-spacing: 0.5px;
     }}
     .formula-desc {{
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -611,7 +605,7 @@ def _build_html(study_guide, video_title: str) -> str:
 
 
 def _clean_text_for_pdf(text: str) -> str:
-    """Safely converts arbitrary unicode text to Latin-1 compatible string without crashing."""
+    """Safely converts arbitrary unicode text to Latin-1 compatible string without crashing FPDF."""
     if not text:
         return ""
     import re
@@ -626,16 +620,23 @@ def _clean_text_for_pdf(text: str) -> str:
         "“": '"',
         "”": '"',
         "„": '"',
+        "«": '"',
+        "»": '"',
         "•": "*",
+        "·": "*",
         "…": "...",
         "→": "->",
         "←": "<-",
+        "↔": "<->",
         "⇒": "=>",
+        "⇐": "<=",
         "⇔": "<=>",
+        "↦": "|->",
         "≥": ">=",
         "≤": "<=",
         "≠": "!=",
         "≈": "~",
+        "≡": "==",
         "±": "+/-",
         "×": "x",
         "÷": "/",
@@ -643,18 +644,52 @@ def _clean_text_for_pdf(text: str) -> str:
         "∑": "sum",
         "∏": "prod",
         "∫": "integral",
+        "∂": "d",
+        "∇": "grad",
+        "∞": "inf",
+        "∈": " in ",
+        "∉": " not in ",
+        "⊆": " subset of ",
+        "⊂": " subset ",
+        "∪": " union ",
+        "∩": " intersect ",
+        "∀": "for all ",
+        "∃": "there exists ",
         "°": " deg",
         "µ": "u",
         "α": "alpha",
         "β": "beta",
         "γ": "gamma",
+        "δ": "delta",
+        "ε": "epsilon",
+        "ζ": "zeta",
+        "η": "eta",
         "θ": "theta",
+        "ι": "iota",
+        "κ": "kappa",
         "λ": "lambda",
         "μ": "mu",
+        "ν": "nu",
+        "ξ": "xi",
         "π": "pi",
+        "ρ": "rho",
         "σ": "sigma",
+        "τ": "tau",
+        "υ": "upsilon",
+        "φ": "phi",
+        "χ": "chi",
+        "ψ": "psi",
         "ω": "omega",
+        "Γ": "Gamma",
         "Δ": "Delta",
+        "Θ": "Theta",
+        "Λ": "Lambda",
+        "Ξ": "Xi",
+        "Π": "Pi",
+        "Σ": "Sigma",
+        "Υ": "Upsilon",
+        "Φ": "Phi",
+        "Ψ": "Psi",
         "Ω": "Omega",
         "\u00A0": " ",
         "\u200B": "",
@@ -664,42 +699,27 @@ def _clean_text_for_pdf(text: str) -> str:
         "📐": "",
         "🔬": "",
         "📷": "",
+        "✓": "[OK]",
+        "✗": "[X]",
+        "★": "*",
+        "☆": "*",
     }
     for old, new in replacements.items():
         text = text.replace(old, new)
     return text.encode("latin-1", "replace").decode("latin-1")
 
 
-def _find_system_ttf_font() -> tuple[Optional[str], Optional[str], Optional[str]]:
-    """Locates system Unicode TrueType fonts (Regular, Bold, Italic)."""
+def _find_system_ttf_font() -> tuple[Optional[str], Optional[str]]:
+    """Locates system Unicode TrueType fonts (Regular, Bold)."""
     candidates = [
-        (
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf",
-        ),
-        (
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Italic.ttf",
-        ),
-        (
-            "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
-            "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
-            "/usr/share/fonts/truetype/freefont/FreeSansOblique.ttf",
-        ),
-        (
-            "/System/Library/Fonts/Supplemental/Arial.ttf",
-            "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
-            "/System/Library/Fonts/Supplemental/Arial Italic.ttf",
-        ),
+        ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+        ("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf", "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"),
+        ("/usr/share/fonts/truetype/freefont/FreeSans.ttf", "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf"),
     ]
-    for reg, bold, italic in candidates:
+    for reg, bold in candidates:
         if os.path.exists(reg):
-            b = bold if os.path.exists(bold) else reg
-            i = italic if os.path.exists(italic) else reg
-            return reg, b, i
-    return None, None, None
+            return reg, (bold if os.path.exists(bold) else None)
+    return None, None
 
 
 def build_study_guide_pdf(
@@ -729,18 +749,20 @@ def build_study_guide_pdf(
             chrome_bin,
             "--headless=new",
             "--no-sandbox",
+            "--disable-setuid-sandbox",
             "--disable-dev-shm-usage",
             "--disable-gpu",
             "--disable-software-rasterizer",
             "--allow-file-access-from-files",
             "--no-pdf-header-footer",
-            "--virtual-time-budget=3000",
+            "--run-all-compositor-stages-before-draw",
+            "--virtual-time-budget=5000",
             f"--print-to-pdf={output_path.resolve()}",
-            str(html_path.resolve()),
+            html_path.resolve().as_uri(),
         ]
         try:
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
-            if output_path.exists() and output_path.stat().st_size > 500:
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=25)
+            if output_path.exists() and output_path.stat().st_size > 1500:
                 log.info("Study guide PDF compiled successfully via Chrome! (%d bytes)", output_path.stat().st_size)
                 return output_path
             else:
@@ -755,70 +777,26 @@ def build_study_guide_pdf(
         from fpdf import FPDF
 
         class StudyGuidePDF(FPDF):
-            def __init__(self, *args, **kwargs):
-                super().__init__(*args, **kwargs)
-                self.doc_font_family = "Helvetica"
-
             def footer(self):
                 self.set_y(-15)
-                try:
-                    self.set_font(self.doc_font_family, "I", 8)
-                except Exception:
-                    try:
-                        self.set_font(self.doc_font_family, "", 8)
-                    except Exception:
-                        self.set_font("Helvetica", "", 8)
+                self.set_font("Helvetica", "I", 8)
                 self.set_text_color(140, 140, 140)
                 self.set_x(self.l_margin)
-                self.cell(0, 10, f"Page {self.page_no()}", align="C", new_x="RIGHT", new_y="TOP")
+                self.cell(0, 10, f"Page {self.page_no()}", 0, 0, "C")
 
         pdf = StudyGuidePDF(orientation="P", unit="mm", format="A4")
         pdf.set_auto_page_break(auto=True, margin=18)
-
-        # Check for system Unicode fonts
-        reg_ttf, bold_ttf, italic_ttf = _find_system_ttf_font()
-        use_unicode_font = False
         font_family = "Helvetica"
-        if reg_ttf:
-            try:
-                pdf.add_font("SysSans", "", reg_ttf)
-                pdf.add_font("SysSans", "B", bold_ttf or reg_ttf)
-                pdf.add_font("SysSans", "I", italic_ttf or reg_ttf)
-                pdf.add_font("SysSans", "BI", bold_ttf or reg_ttf)
-                font_family = "SysSans"
-                pdf.doc_font_family = "SysSans"
-                use_unicode_font = True
-                log.info("Registered system TrueType font for PDF fallback: %s", reg_ttf)
-            except Exception as fe:
-                log.warning("Failed to register TrueType font: %s", fe)
 
         def safe_txt(t: str) -> str:
-            if not t:
-                return ""
-            import re
-            cleaned = re.sub(r'[\U00010000-\U0010ffff]', '', str(t))
-            return cleaned if use_unicode_font else _clean_text_for_pdf(cleaned)
+            return _clean_text_for_pdf(str(t)) if t else ""
 
-        def set_safe_font(style: str = "", size: float = 10, color: tuple = (30, 41, 59)):
-            try:
-                pdf.set_font(font_family, style, size)
-            except Exception:
-                try:
-                    pdf.set_font(font_family, "", size)
-                except Exception:
-                    pdf.set_font("Helvetica", style if style in ("", "B", "I") else "", size)
-            try:
-                pdf.set_text_color(*color)
-            except Exception:
-                pass
-
-        def safe_cell(text: str, h: float = 6, ln: bool = True, align: str = "L"):
+        def safe_cell(text: str, h: float = 6, align: str = "L"):
             pdf.set_x(pdf.l_margin)
-            clean = safe_txt(text).replace("\r", " ").replace("\n", " ")
-            if ln:
-                pdf.cell(0, h, clean, align=align, new_x="LMARGIN", new_y="NEXT")
-            else:
-                pdf.cell(0, h, clean, align=align, new_x="RIGHT", new_y="TOP")
+            try:
+                pdf.cell(0, h, safe_txt(text), new_x="LMARGIN", new_y="NEXT", align=align)
+            except TypeError:
+                pdf.cell(0, h, safe_txt(text), ln=True, align=align)
 
         def safe_multi(text: str, h: float = 5):
             pdf.set_x(pdf.l_margin)
@@ -827,11 +805,13 @@ def build_study_guide_pdf(
         pdf.add_page()
 
         # Document Header
-        set_safe_font("B", 18, (30, 41, 59))
+        pdf.set_font(font_family, "B", 18)
+        pdf.set_text_color(30, 41, 59)
         safe_multi(study_guide.video_title if hasattr(study_guide, "video_title") and study_guide.video_title else video_title, h=8)
         pdf.ln(2)
 
-        set_safe_font("I", 11, (100, 116, 139))
+        pdf.set_font(font_family, "I", 11)
+        pdf.set_text_color(100, 116, 139)
         safe_cell("Comprehensive Academic Study Guide & Lecture Notes", h=6)
         pdf.ln(4)
 
@@ -840,70 +820,84 @@ def build_study_guide_pdf(
         if summary:
             pdf.set_fill_color(241, 245, 249)
             pdf.set_draw_color(203, 213, 225)
-            set_safe_font("B", 11, (15, 23, 42))
+            pdf.set_font(font_family, "B", 11)
+            pdf.set_text_color(15, 23, 42)
             safe_cell("Executive Lecture Overview", h=7)
-            set_safe_font("", 9, (30, 41, 59))
+            pdf.set_font(font_family, "", 9)
             safe_multi(summary, h=5)
             pdf.ln(5)
 
         # Table of Contents
         chapters = getattr(study_guide, "chapters", [])
         if chapters:
-            set_safe_font("B", 12, (37, 99, 235))
+            pdf.set_font(font_family, "B", 12)
+            pdf.set_text_color(37, 99, 235)
             safe_cell("Table of Contents", h=8)
-            set_safe_font("", 9, (51, 65, 85))
+            pdf.set_font(font_family, "", 9)
+            pdf.set_text_color(51, 65, 85)
             for ch in chapters:
                 safe_cell(f"  * Chapter {ch.chapter_num}: {ch.title}", h=5)
             pdf.ln(6)
 
         # Chapters
         for ch in chapters:
-            c_num = ch.chapter_num
-            c_title = ch.title
-            c_sub = ch.subtitle
+            c_num = getattr(ch, "chapter_num", 1)
+            c_title = getattr(ch, "title", "Chapter")
+            c_sub = getattr(ch, "subtitle", "")
 
             pdf.ln(3)
-            set_safe_font("B", 14, (30, 58, 138))
+            pdf.set_font(font_family, "B", 14)
+            pdf.set_text_color(30, 58, 138)
             safe_cell(f"Chapter {c_num:02d}: {c_title}", h=8)
 
             if c_sub:
-                set_safe_font("I", 10, (100, 116, 139))
+                pdf.set_font(font_family, "I", 10)
+                pdf.set_text_color(100, 116, 139)
                 safe_cell(c_sub, h=5)
                 pdf.ln(2)
 
-            if ch.introduction:
-                set_safe_font("", 9, (51, 65, 85))
-                safe_multi(ch.introduction, h=5)
+            intro = getattr(ch, "introduction", "")
+            if intro:
+                pdf.set_font(font_family, "", 9)
+                pdf.set_text_color(51, 65, 85)
+                safe_multi(intro, h=5)
                 pdf.ln(2)
 
             # Figures
-            for fig in getattr(ch, "associated_figures", []):
-                if fig.image_path and os.path.exists(fig.image_path):
+            for fig in (getattr(ch, "associated_figures", []) or []):
+                img_path = getattr(fig, "image_path", None) if not isinstance(fig, dict) else fig.get("image_path")
+                if img_path and os.path.exists(img_path):
                     try:
                         pdf.ln(2)
                         pdf.set_x(pdf.l_margin)
-                        pdf.image(fig.image_path, w=min(140, pdf.epw))
+                        pdf.image(img_path, w=min(140, pdf.epw))
                         pdf.ln(1)
-                        if fig.caption:
-                            set_safe_font("I", 8, (100, 116, 139))
-                            safe_multi(f"Figure: {fig.caption}", h=4)
+                        caption = getattr(fig, "caption", "") if not isinstance(fig, dict) else fig.get("caption", "")
+                        if caption:
+                            pdf.set_font(font_family, "I", 8)
+                            pdf.set_text_color(100, 116, 139)
+                            safe_multi(f"Figure: {caption}", h=4)
                             pdf.ln(2)
                     except Exception as img_err:
                         log.debug("Fallback PDF image render skipped: %s", img_err)
 
             # Content Paragraphs
-            set_safe_font("", 9, (30, 41, 59))
-            for p in ch.content_paragraphs:
-                if p and p.strip():
-                    safe_multi(p.strip(), h=5)
+            pdf.set_font(font_family, "", 9)
+            pdf.set_text_color(30, 41, 59)
+            for p in getattr(ch, "content_paragraphs", []):
+                if p and str(p).strip():
+                    safe_multi(str(p).strip(), h=5)
                     pdf.ln(2)
 
             # Formulas
-            if ch.latex_formulas:
-                set_safe_font("B", 9, (29, 78, 216))
+            formulas = getattr(ch, "latex_formulas", [])
+            if formulas:
+                pdf.set_font(font_family, "B", 9)
+                pdf.set_text_color(29, 78, 216)
                 safe_cell("Key Formulations & Relations:", h=6)
-                set_safe_font("", 8, (30, 41, 59))
-                for item in ch.latex_formulas:
+                pdf.set_font(font_family, "", 8)
+                pdf.set_text_color(30, 41, 59)
+                for item in formulas:
                     if isinstance(item, dict):
                         f_eq = str(item.get("formula", "")).strip()
                         f_desc = str(item.get("description", "")).strip()
@@ -919,19 +913,23 @@ def build_study_guide_pdf(
                     pdf.ln(1)
 
             # Key Takeaways
-            if ch.key_takeaways:
+            takeaways = getattr(ch, "key_takeaways", [])
+            if takeaways:
                 pdf.ln(1)
-                set_safe_font("B", 9, (15, 23, 42))
+                pdf.set_font(font_family, "B", 9)
+                pdf.set_text_color(15, 23, 42)
                 safe_cell("Key Takeaways:", h=5)
-                set_safe_font("", 8, (30, 41, 59))
-                for take in ch.key_takeaways:
+                pdf.set_font(font_family, "", 8)
+                for take in takeaways:
                     safe_multi(f"  * {take}", h=4)
                 pdf.ln(2)
 
             # Instructor Notes
-            if ch.instructor_notes and ch.instructor_notes.strip():
-                set_safe_font("I", 8, (180, 83, 9))
-                safe_multi(f"Instructor Note: {ch.instructor_notes.strip()}", h=4)
+            inst_notes = getattr(ch, "instructor_notes", "")
+            if inst_notes and str(inst_notes).strip():
+                pdf.set_font(font_family, "I", 8)
+                pdf.set_text_color(180, 83, 9)
+                safe_multi(f"Instructor Note: {str(inst_notes).strip()}", h=4)
                 pdf.ln(2)
 
         pdf.output(str(output_path))
@@ -939,111 +937,90 @@ def build_study_guide_pdf(
         return output_path
 
     except Exception as fallback_err:
-        log.exception("Detailed fallback failed (%s). Writing resilient chapter PDF.", fallback_err)
-        try:
-            from fpdf import FPDF
-            emergency_pdf = FPDF(orientation="P", unit="mm", format="A4")
-            emergency_pdf.set_auto_page_break(auto=True, margin=15)
+        log.exception("Detailed fallback failed (%s). Writing resilient emergency text PDF.", fallback_err)
+        from fpdf import FPDF
+        emergency_pdf = FPDF(orientation="P", unit="mm", format="A4")
+        emergency_pdf.set_auto_page_break(auto=True, margin=15)
+        emergency_pdf.add_page()
+        emergency_pdf.set_font("Helvetica", "B", 16)
+        title = getattr(study_guide, "video_title", video_title) or video_title
+        emergency_pdf.multi_cell(0, 8, _clean_text_for_pdf(title))
+        emergency_pdf.ln(3)
 
-            reg_ttf, bold_ttf, italic_ttf = _find_system_ttf_font()
-            use_emer_unicode = False
-            emer_font = "Helvetica"
-            if reg_ttf:
-                try:
-                    emergency_pdf.add_font("SysSans", "", reg_ttf)
-                    emergency_pdf.add_font("SysSans", "B", bold_ttf or reg_ttf)
-                    emergency_pdf.add_font("SysSans", "I", italic_ttf or reg_ttf)
-                    emer_font = "SysSans"
-                    use_emer_unicode = True
-                except Exception:
-                    pass
-
-            def emer_txt(t: str) -> str:
-                if not t:
-                    return ""
-                if use_emer_unicode:
-                    import re
-                    return re.sub(r'[\U00010000-\U0010ffff]', '', str(t))
-                return _clean_text_for_pdf(str(t))
-
-            emergency_pdf.add_page()
-            emergency_pdf.set_font(emer_font, "B", 16)
-            title = getattr(study_guide, "video_title", video_title) or video_title
-            emergency_pdf.multi_cell(0, 8, emer_txt(title))
-            emergency_pdf.ln(3)
-
-            summary = getattr(study_guide, "lecture_summary", "")
-            if summary:
-                emergency_pdf.set_font(emer_font, "B", 12)
+        summary = getattr(study_guide, "lecture_summary", "")
+        if summary:
+            emergency_pdf.set_font("Helvetica", "B", 12)
+            try:
                 emergency_pdf.cell(0, 8, "Executive Lecture Summary", new_x="LMARGIN", new_y="NEXT")
-                emergency_pdf.set_font(emer_font, "", 10)
-                emergency_pdf.multi_cell(0, 5, emer_txt(summary))
-                emergency_pdf.ln(4)
+            except TypeError:
+                emergency_pdf.cell(0, 8, "Executive Lecture Summary", ln=True)
+            emergency_pdf.set_font("Helvetica", "", 10)
+            emergency_pdf.multi_cell(0, 5, _clean_text_for_pdf(summary))
+            emergency_pdf.ln(4)
 
-            chapters = getattr(study_guide, "chapters", [])
-            for ch in chapters:
-                emergency_pdf.set_font(emer_font, "B", 13)
-                c_num = getattr(ch, "chapter_num", 1)
-                c_title = emer_txt(getattr(ch, "title", "Chapter")).replace("\n", " ")
+        chapters = getattr(study_guide, "chapters", [])
+        for ch in chapters:
+            emergency_pdf.set_font("Helvetica", "B", 13)
+            c_num = getattr(ch, "chapter_num", 1)
+            c_title = _clean_text_for_pdf(getattr(ch, "title", "Chapter"))
+            try:
                 emergency_pdf.cell(0, 8, f"Chapter {c_num:02d}: {c_title}", new_x="LMARGIN", new_y="NEXT")
+            except TypeError:
+                emergency_pdf.cell(0, 8, f"Chapter {c_num:02d}: {c_title}", ln=True)
 
-                c_sub = emer_txt(getattr(ch, "subtitle", "")).replace("\n", " ")
-                if c_sub:
-                    emergency_pdf.set_font(emer_font, "I", 10)
+            c_sub = _clean_text_for_pdf(getattr(ch, "subtitle", ""))
+            if c_sub:
+                emergency_pdf.set_font("Helvetica", "I", 10)
+                try:
                     emergency_pdf.cell(0, 5, c_sub, new_x="LMARGIN", new_y="NEXT")
+                except TypeError:
+                    emergency_pdf.cell(0, 5, c_sub, ln=True)
 
-                emergency_pdf.set_font(emer_font, "", 10)
-                intro = getattr(ch, "introduction", "")
-                if intro:
-                    emergency_pdf.multi_cell(0, 5, emer_txt(intro))
+            emergency_pdf.set_font("Helvetica", "", 10)
+            intro = getattr(ch, "introduction", "")
+            if intro:
+                emergency_pdf.multi_cell(0, 5, _clean_text_for_pdf(intro))
+                emergency_pdf.ln(2)
+
+            for p in getattr(ch, "content_paragraphs", []):
+                if p and str(p).strip():
+                    emergency_pdf.multi_cell(0, 5, _clean_text_for_pdf(str(p).strip()))
                     emergency_pdf.ln(2)
 
-                for p in getattr(ch, "content_paragraphs", []):
-                    if p and p.strip():
-                        emergency_pdf.multi_cell(0, 5, emer_txt(p.strip()))
-                        emergency_pdf.ln(2)
-
-                formulas = getattr(ch, "latex_formulas", [])
-                if formulas:
-                    emergency_pdf.set_font(emer_font, "B", 9)
+            formulas = getattr(ch, "latex_formulas", [])
+            if formulas:
+                emergency_pdf.set_font("Helvetica", "B", 9)
+                try:
                     emergency_pdf.cell(0, 5, "Key Formulations & Rules:", new_x="LMARGIN", new_y="NEXT")
-                    emergency_pdf.set_font(emer_font, "", 9)
-                    for item in formulas:
-                        if isinstance(item, dict):
-                            f_eq = emer_txt(str(item.get("formula", "")).strip())
-                            f_desc = emer_txt(str(item.get("description", "")).strip())
-                        elif isinstance(item, str):
-                            f_eq = emer_txt(item.strip())
-                            f_desc = ""
-                        else:
-                            continue
-                        if f_eq:
-                            emergency_pdf.multi_cell(0, 4, f"  * {f_eq} - {f_desc}" if f_desc else f"  * {f_eq}")
-                    emergency_pdf.ln(2)
+                except TypeError:
+                    emergency_pdf.cell(0, 5, "Key Formulations & Rules:", ln=True)
+                emergency_pdf.set_font("Helvetica", "", 9)
+                for item in formulas:
+                    if isinstance(item, dict):
+                        f_eq = _clean_text_for_pdf(str(item.get("formula", "")).strip())
+                        f_desc = _clean_text_for_pdf(str(item.get("description", "")).strip())
+                    elif isinstance(item, str):
+                        f_eq = _clean_text_for_pdf(item.strip())
+                        f_desc = ""
+                    else:
+                        continue
+                    if f_eq:
+                        emergency_pdf.multi_cell(0, 4, f"  * {f_eq} - {f_desc}" if f_desc else f"  * {f_eq}")
+                emergency_pdf.ln(2)
 
-                takeaways = getattr(ch, "key_takeaways", [])
-                if takeaways:
-                    emergency_pdf.set_font(emer_font, "B", 9)
+            takeaways = getattr(ch, "key_takeaways", [])
+            if takeaways:
+                emergency_pdf.set_font("Helvetica", "B", 9)
+                try:
                     emergency_pdf.cell(0, 5, "Key Takeaways:", new_x="LMARGIN", new_y="NEXT")
-                    emergency_pdf.set_font(emer_font, "", 9)
-                    for t in takeaways:
-                        emergency_pdf.multi_cell(0, 4, f"  - {emer_txt(str(t))}")
-                    emergency_pdf.ln(3)
+                except TypeError:
+                    emergency_pdf.cell(0, 5, "Key Takeaways:", ln=True)
+                emergency_pdf.set_font("Helvetica", "", 9)
+                for t in takeaways:
+                    emergency_pdf.multi_cell(0, 4, f"  - {_clean_text_for_pdf(str(t))}")
+                emergency_pdf.ln(3)
 
-            emergency_pdf.output(str(output_path))
-            log.info("Wrote full chapter PDF via resilient fallback (%d bytes)", output_path.stat().st_size)
-            return output_path
-        except Exception as emer_err:
-            log.exception("Emergency PDF write failed: %s. Generating safe diagnostic fallback.", emer_err)
-            from fpdf import FPDF
-            safe_pdf = FPDF(orientation="P", unit="mm", format="A4")
-            safe_pdf.add_page()
-            safe_pdf.set_font("Helvetica", "B", 14)
-            safe_pdf.cell(0, 10, "Lecture Study Guide", new_x="LMARGIN", new_y="NEXT")
-            safe_pdf.set_font("Helvetica", "", 10)
-            summary = getattr(study_guide, "lecture_summary", "")
-            if summary:
-                safe_pdf.multi_cell(0, 6, _clean_text_for_pdf(summary))
-            safe_pdf.output(str(output_path))
-            return output_path
+        emergency_pdf.output(str(output_path))
+        log.info("Wrote full chapter PDF via resilient emergency fallback (%d bytes)", output_path.stat().st_size)
+        return output_path
 
