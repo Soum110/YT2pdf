@@ -34,6 +34,7 @@ import json
 import logging
 import os
 import re
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -699,7 +700,19 @@ def generate_study_guide_content(
     crops_dir = crops_dir or Path("./diagram_crops")
 
     # 1. Compile full lecture transcript
-    full_transcript = " ".join(seg[2] for seg in transcript_segments if len(seg) >= 3 and seg[2].strip())
+    tr_parts = []
+    for seg in (transcript_segments or []):
+        if isinstance(seg, (list, tuple)) and len(seg) >= 3:
+            txt = str(seg[2] or "").strip()
+            if txt:
+                tr_parts.append(txt)
+        elif isinstance(seg, dict):
+            txt = str(seg.get("text") or seg.get("utf8") or "").strip()
+            if txt:
+                tr_parts.append(txt)
+        elif isinstance(seg, str) and seg.strip():
+            tr_parts.append(seg.strip())
+    full_transcript = " ".join(tr_parts).strip()
     mins, secs = divmod(int(total_duration), 60)
     duration_str = f"{mins}m {secs}s"
 
@@ -743,7 +756,7 @@ def generate_study_guide_content(
     )
 
     transcript_section = (
-        full_transcript[:22000]
+        full_transcript[:50000]
         if full_transcript
         else "No spoken audio transcript was available for this video. Author an exhaustive, rigorous academic textbook chapter synthesizing and proving all principles, definitions, equations, and worked exemplar problems directly from the mathematical slide catalog above."
     )

@@ -2508,6 +2508,30 @@
         </button>
       </div>
 
+      <!-- Deliverable 1: AI Comprehensive Study Guide -->
+      <div class="study-guide-card" id="study-guide-container">
+        <div class="guide-copy">
+          <div class="guide-tag-row">
+            <span class="badge-popular">Basic → Advanced</span>
+            <span style="font-size:12px;font-weight:600;color:var(--ink);">Academic Chapter</span>
+          </div>
+          <h2 class="guide-heading">Comprehensive Study Guide</h2>
+          <p class="guide-desc" id="guide-desc-text">
+            Complete academic textbook chapter with full mathematical derivations, LaTeX formulas, problem sets, and key lecture diagrams.
+          </p>
+          <div class="guide-features">
+            <span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> 6 Chapters</span>
+            <span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> Slide Formulas</span>
+            <span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> Solved Problems</span>
+            <span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> Formula Sheet</span>
+          </div>
+        </div>
+        <button class="btn-download-guide" id="dl-guide-btn" onclick="downloadGuide()" style="cursor:pointer;">
+          <span id="dl-guide-text">Download Study Guide</span>
+          <span class="sub-label" id="dl-guide-sub">Full Academic Chapter (PDF)</span>
+        </button>
+      </div>
+
       <!-- Slide Studio (Preview & Curation) -->
       <div class="slide-studio-card">
         <div class="studio-top">
@@ -3198,7 +3222,41 @@
     }
   }
 
-  async function downloadGuide() {}
+  async function downloadGuide() {
+    if (!jobId) return;
+    const url = getDownloadUrl(`/api/download/${jobId}/guide`);
+
+    // Strategy 1: Direct link trigger
+    const a = document.createElement("a");
+    a.href = url;
+    a.setAttribute("download", `study_guide_${jobId}.pdf`);
+    a.target = "_blank";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => a.remove(), 250);
+
+    // Strategy 2: Blob fallback
+    try {
+      const res = await apiFetch(`/api/download/${jobId}/guide`);
+      if (res.ok) {
+        const blob = await res.blob();
+        if (blob && blob.size > 200) {
+          const blobUrl = window.URL.createObjectURL(blob);
+          const bLink = document.createElement("a");
+          bLink.href = blobUrl;
+          bLink.setAttribute("download", `study_guide_${jobId}.pdf`);
+          document.body.appendChild(bLink);
+          bLink.click();
+          setTimeout(() => {
+            bLink.remove();
+            window.URL.revokeObjectURL(blobUrl);
+          }, 1500);
+        }
+      }
+    } catch (err) {
+      console.warn("Direct blob guide download error:", err);
+    }
+  }
 
   function showProgress() {
     document.getElementById("progress-section").style.display = "block";
@@ -3463,6 +3521,8 @@
     }
   });
 
+  let studyGuidePollTimer = null;
+
   function showResult(data, outputs) {
     document.getElementById("result-section").style.display = "block";
     document.getElementById("progress-section").style.display = "none";
@@ -3472,6 +3532,52 @@
     if (dlBtn) dlBtn.style.display = "inline-flex";
     const bannerDlBtn = document.getElementById("banner-dl-slides-btn");
     if (bannerDlBtn) bannerDlBtn.style.display = "inline-flex";
+
+    const guideBtn = document.getElementById("dl-guide-btn");
+    const guideText = document.getElementById("dl-guide-text");
+    const guideSub = document.getElementById("dl-guide-sub");
+
+    function updateGuideUI(ready) {
+      if (!guideBtn) return;
+      if (ready) {
+        guideBtn.disabled = false;
+        guideBtn.style.opacity = "1";
+        guideBtn.style.cursor = "pointer";
+        if (guideText) guideText.textContent = "Download Study Guide";
+        if (guideSub) guideSub.textContent = "Full Academic Chapter (PDF)";
+      } else {
+        guideBtn.disabled = true;
+        guideBtn.style.opacity = "0.7";
+        guideBtn.style.cursor = "wait";
+        if (guideText) guideText.textContent = "Synthesizing Study Guide...";
+        if (guideSub) guideSub.textContent = "AI generating textbook chapter...";
+      }
+    }
+
+    if (outputs && outputs.study_guide_pdf) {
+      updateGuideUI(true);
+    } else {
+      updateGuideUI(false);
+      if (studyGuidePollTimer) clearInterval(studyGuidePollTimer);
+      let pollAttempts = 0;
+      studyGuidePollTimer = setInterval(async () => {
+        pollAttempts++;
+        if (pollAttempts > 45) {
+          clearInterval(studyGuidePollTimer);
+          return;
+        }
+        try {
+          const res = await apiFetch(`/api/outputs/${jobId}`);
+          if (res.ok) {
+            const outData = await res.json();
+            if (outData && outData.study_guide_pdf) {
+              clearInterval(studyGuidePollTimer);
+              updateGuideUI(true);
+            }
+          }
+        } catch (e) {}
+      }, 3000);
+    }
 
     loadSlidePreview(jobId);
 

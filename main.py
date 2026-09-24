@@ -406,8 +406,37 @@ async def download_slides_pdf(job_id: str):
 
 @app.api_route("/api/download/{job_id}/guide", methods=["GET", "HEAD"])
 async def download_guide_pdf(job_id: str):
-    """Download the AI study guide PDF (removed)."""
-    raise HTTPException(status_code=404, detail="Study guide feature has been removed.")
+    """Download the AI comprehensive study guide PDF."""
+    pdf_path = JOBS_ROOT / job_id / "study_guide.pdf"
+    if not pdf_path.exists() or pdf_path.stat().st_size < 100:
+        raise HTTPException(status_code=404, detail="Study guide PDF not ready yet or job not found.")
+
+    import json
+    meta_file = JOBS_ROOT / job_id / "meta.json"
+    filename = "study_guide.pdf"
+    if meta_file.exists():
+        try:
+            mdata = json.loads(meta_file.read_text())
+            t = mdata.get("title") or mdata.get("video_title")
+            if t:
+                import re
+                clean = re.sub(r'[\\/*?:"<>|]', "", t).strip()
+                clean = clean.replace(" ", "_")
+                filename = f"{clean[:50]}_study_guide.pdf"
+        except Exception:
+            pass
+
+    return FileResponse(
+        path=str(pdf_path),
+        filename=filename,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Expose-Headers": "Content-Disposition",
+            "Cache-Control": "no-cache",
+        },
+    )
 
 
 @app.get("/api/outputs/{job_id}")
@@ -416,6 +445,7 @@ async def get_outputs(job_id: str):
     import json
     slides_dir = JOBS_ROOT / job_id / "slides"
     has_slides = slides_dir.exists() and any(slides_dir.glob("slide_*.png"))
+    has_guide_pdf = (JOBS_ROOT / job_id / "study_guide.pdf").exists() and (JOBS_ROOT / job_id / "study_guide.pdf").stat().st_size > 100
 
     outputs_file = JOBS_ROOT / job_id / "outputs.json"
     if outputs_file.exists():
@@ -423,7 +453,7 @@ async def get_outputs(job_id: str):
             data = json.loads(outputs_file.read_text())
             if has_slides:
                 data["slides_pdf"] = True
-            data["study_guide_pdf"] = False
+            data["study_guide_pdf"] = has_guide_pdf or bool(data.get("study_guide_pdf"))
             return JSONResponse(content=data)
         except Exception:
             pass
@@ -433,7 +463,7 @@ async def get_outputs(job_id: str):
     slide_count = len(list(slides_dir.glob("slide_*.png"))) if slides_dir.exists() else 0
     return JSONResponse(content={
         "slides_pdf": has_slides_pdf,
-        "study_guide_pdf": False,
+        "study_guide_pdf": has_guide_pdf,
         "slide_count": slide_count,
     })
 

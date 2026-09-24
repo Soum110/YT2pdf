@@ -596,6 +596,8 @@ def run_pipeline(job_id: str, video_url: str, jobs_root: Path, gemini_api_key: s
         _write_status(job_dir, "building_pdf", 78, "Saving slide images...")
         from slide_extractor import save_slides
         saved_paths = save_slides(verified, slides_dir)
+        for s_obj, p in zip(verified, saved_paths):
+            s_obj.image_path = Path(p)
 
         # ── Step 6: Build Slides PDF ───────────────────────────────────────
         _write_status(job_dir, "building_pdf", 82, f"Building slides PDF from {len(saved_paths)} slides...")
@@ -613,18 +615,92 @@ def run_pipeline(job_id: str, video_url: str, jobs_root: Path, gemini_api_key: s
         )
         log.info("[%s] Slides PDF ready: %s", job_id, slides_pdf_path)
 
-        # ── Done ───────────────────────────────────────────────────────────
+        # ── Done with slides: Ready for download immediately ───────────────
         _write_status(
             job_dir, "completed", 100,
             f"Done! {len(verified)} slides extracted.",
             slide_count=len(verified),
         )
-        # Write a flags file so the frontend knows what's available
         (job_dir / "outputs.json").write_text(json.dumps({
             "slides_pdf": True,
             "study_guide_pdf": False,
             "slide_count": len(verified),
         }))
+
+        # ── Step 7: AI Comprehensive Study Guide Synthesis ─────────────────
+        guide_ready = False
+        crops_dir = job_dir / "diagram_crops"
+        crops_dir.mkdir(parents=True, exist_ok=True)
+
+        transcript_segments = []
+        try:
+            from transcript_fetcher import fetch_transcript
+            transcript_tmp = tempfile.mkdtemp(prefix=f"yt2pdf_tr_{job_id}_")
+            try:
+                transcript_segments = fetch_transcript(video_url, tmp_dir=transcript_tmp)
+            finally:
+                shutil.rmtree(transcript_tmp, ignore_errors=True)
+        except Exception as tr_err:
+            log.warning("[%s] Server transcript fetch failed: %s", job_id, tr_err)
+            transcript_segments = []
+
+        try:
+            (job_dir / "transcript.json").write_text(json.dumps(transcript_segments, ensure_ascii=False), encoding="utf-8")
+        except Exception:
+            pass
+
+        if gemini_api_key and gemini_api_key != "YOUR_GEMINI_API_KEY_HERE":
+            try:
+                log.info("[%s] Synthesizing study guide with Gemini (%d transcript segments)...", job_id, len(transcript_segments))
+                from study_guide_generator import generate_study_guide_content
+                from pdf_study_guide import build_study_guide_pdf
+
+                study_guide = generate_study_guide_content(
+                    slides=verified,
+                    transcript_segments=transcript_segments,
+                    total_duration=float(duration),
+                    gemini_api_key=gemini_api_key,
+                    crops_dir=crops_dir,
+                    gemini_model="gemini-2.0-flash",
+                )
+                guide_pdf_path = job_dir / "study_guide.pdf"
+                build_study_guide_pdf(
+                    study_guide=study_guide,
+                    output_path=guide_pdf_path,
+                    video_title=video_title,
+                )
+                guide_ready = guide_pdf_path.exists() and guide_pdf_path.stat().st_size > 500
+                log.info("[%s] Study guide PDF ready: %s (size: %d bytes)", job_id, guide_ready, guide_pdf_path.stat().st_size if guide_pdf_path.exists() else 0)
+            except Exception as guide_err:
+                log.warning("[%s] Study guide synthesis error: %s", job_id, guide_err)
+
+        if not guide_ready and verified:
+            try:
+                from study_guide_generator import generate_deterministic_study_guide
+                from pdf_study_guide import build_study_guide_pdf
+                det_guide = generate_deterministic_study_guide(
+                    slides=verified,
+                    transcript_segments=transcript_segments,
+                    video_title=video_title,
+                    total_duration=float(duration),
+                    crops_dir=crops_dir,
+                )
+                guide_pdf_path = job_dir / "study_guide.pdf"
+                build_study_guide_pdf(
+                    study_guide=det_guide,
+                    output_path=guide_pdf_path,
+                    video_title=video_title,
+                )
+                guide_ready = guide_pdf_path.exists() and guide_pdf_path.stat().st_size > 500
+            except Exception as det_err:
+                log.warning("[%s] Fallback study guide compilation error: %s", job_id, det_err)
+
+        if guide_ready:
+            (job_dir / "outputs.json").write_text(json.dumps({
+                "slides_pdf": True,
+                "study_guide_pdf": True,
+                "slide_count": len(verified),
+            }))
 
         # ── Cache completed job ───────────────────────────────────────────
         try:
@@ -752,6 +828,8 @@ def run_pipeline_from_frames(
         # Save slide images to final slides_dir as PNGs
         _write_status(job_dir, "building_pdf", 78, "Saving slide images...")
         saved_paths = save_slides(verified, slides_dir)
+        for s_obj, p in zip(verified, saved_paths):
+            s_obj.image_path = Path(p)
 
         # Build Slides PDF
         _write_status(job_dir, "building_pdf", 82, f"Building slides PDF from {len(saved_paths)} slides...")
@@ -770,7 +848,7 @@ def run_pipeline_from_frames(
         # Cleanup raw frames
         shutil.rmtree(raw_frames_dir, ignore_errors=True)
 
-        # Write final completion status & outputs
+        # Write completion status & initial outputs (Slides PDF ready immediately!)
         _write_status(
             job_dir, "completed", 100,
             f"Done! {len(verified)} slides extracted.",
@@ -781,6 +859,70 @@ def run_pipeline_from_frames(
             "study_guide_pdf": False,
             "slide_count": len(verified),
         }))
+
+        # Generate Comprehensive Study Guide with Gemini
+        guide_ready = False
+        crops_dir = job_dir / "diagram_crops"
+        crops_dir.mkdir(parents=True, exist_ok=True)
+        transcript_segments = client_transcript or []
+
+        try:
+            (job_dir / "transcript.json").write_text(json.dumps(transcript_segments, ensure_ascii=False), encoding="utf-8")
+        except Exception:
+            pass
+
+        if gemini_api_key and gemini_api_key != "YOUR_GEMINI_API_KEY_HERE":
+            try:
+                log.info("[%s] Synthesizing companion study guide with Gemini (%d transcript segments)...", job_id, len(transcript_segments))
+                from study_guide_generator import generate_study_guide_content
+                from pdf_study_guide import build_study_guide_pdf
+
+                study_guide = generate_study_guide_content(
+                    slides=verified,
+                    transcript_segments=transcript_segments,
+                    total_duration=float(duration),
+                    gemini_api_key=gemini_api_key,
+                    crops_dir=crops_dir,
+                    gemini_model="gemini-2.0-flash",
+                )
+                guide_pdf_path = job_dir / "study_guide.pdf"
+                build_study_guide_pdf(
+                    study_guide=study_guide,
+                    output_path=guide_pdf_path,
+                    video_title=video_title,
+                )
+                guide_ready = guide_pdf_path.exists() and guide_pdf_path.stat().st_size > 500
+                log.info("[%s] Companion study guide PDF ready: %s (size: %d bytes)", job_id, guide_ready, guide_pdf_path.stat().st_size if guide_pdf_path.exists() else 0)
+            except Exception as guide_err:
+                log.warning("[%s] Companion study guide generation failed: %s", job_id, guide_err)
+
+        if not guide_ready and verified:
+            try:
+                from study_guide_generator import generate_deterministic_study_guide
+                from pdf_study_guide import build_study_guide_pdf
+                det_guide = generate_deterministic_study_guide(
+                    slides=verified,
+                    transcript_segments=transcript_segments,
+                    video_title=video_title,
+                    total_duration=float(duration),
+                    crops_dir=crops_dir,
+                )
+                guide_pdf_path = job_dir / "study_guide.pdf"
+                build_study_guide_pdf(
+                    study_guide=det_guide,
+                    output_path=guide_pdf_path,
+                    video_title=video_title,
+                )
+                guide_ready = guide_pdf_path.exists() and guide_pdf_path.stat().st_size > 500
+            except Exception as det_err:
+                log.warning("[%s] Companion fallback study guide failed: %s", job_id, det_err)
+
+        if guide_ready:
+            (job_dir / "outputs.json").write_text(json.dumps({
+                "slides_pdf": True,
+                "study_guide_pdf": True,
+                "slide_count": len(verified),
+            }))
 
         # Cache completed job
         try:
