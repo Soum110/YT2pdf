@@ -92,7 +92,28 @@ def _build_html(study_guide, video_title: str) -> str:
         # 2. Content Paragraphs (Chronological basic -> advanced)
         body_p_html = "".join(f'<p class="explanation-p">{p}</p>' for p in ch.content_paragraphs if p.strip())
 
-        # 3. LaTeX Formulas
+        # 3. Core Terminology & Definitions
+        defs_html = ""
+        core_defs = getattr(ch, "core_definitions", [])
+        if core_defs:
+            dt_items = []
+            for d in core_defs:
+                if isinstance(d, dict):
+                    t = html.escape(str(d.get("term", "")).strip())
+                    df = html.escape(str(d.get("definition", "")).strip())
+                    if t and df:
+                        dt_items.append(f'<div class="def-entry"><dt>{t}:</dt> <dd>{df}</dd></div>')
+            if dt_items:
+                defs_html = f'''
+                <div class="definitions-box">
+                  <div class="definitions-header">📖 Core Definitions & Key Terminology</div>
+                  <dl class="definitions-list">
+                    {"".join(dt_items)}
+                  </dl>
+                </div>
+                '''
+
+        # 4. LaTeX Formulas
         formulas_html = ""
         if ch.latex_formulas:
             formula_cards = []
@@ -124,7 +145,7 @@ def _build_html(study_guide, video_title: str) -> str:
                 </div>
                 '''
 
-        # 4. Key Takeaways
+        # 5. Key Takeaways
         takeaways_html = ""
         if ch.key_takeaways:
             pills = "".join(f'<li class="takeaway-item">{html.escape(str(t))}</li>' for t in ch.key_takeaways)
@@ -135,7 +156,7 @@ def _build_html(study_guide, video_title: str) -> str:
             </div>
             '''
 
-        # 5. Instructor Insights
+        # 6. Instructor Insights
         notes_html = ""
         if ch.instructor_notes and ch.instructor_notes.strip():
             notes_p = html.escape(ch.instructor_notes.strip())
@@ -161,6 +182,8 @@ def _build_html(study_guide, video_title: str) -> str:
           <div class="chapter-body">
             {body_p_html}
           </div>
+
+          {defs_html}
 
           {formulas_html}
 
@@ -387,78 +410,118 @@ def _build_html(study_guide, video_title: str) -> str:
       break-inside: avoid;
     }}
 
-    /* ── Figures & Simulations ── */
+    /* ── Compact Reference Figures ── */
     .figure-card {{
       background: #ffffff;
       border: 1px solid #e2e8f0;
-      border-radius: 10px;
-      padding: 14px;
-      margin: 18px 0 20px;
+      border-radius: 8px;
+      padding: 8px 12px;
+      margin: 10px auto 14px;
+      max-width: 460px;
       text-align: center;
       break-inside: avoid;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+      box-shadow: 0 1px 4px rgba(0,0,0,0.03);
     }}
     .simulation-card {{
       background: #faf5ff;
       border: 1.5px solid #d8b4fe;
-      box-shadow: 0 4px 12px rgba(147, 51, 234, 0.06);
+      box-shadow: 0 3px 8px rgba(147, 51, 234, 0.05);
     }}
     .sim-badge {{
       display: inline-block;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      font-size: 8pt;
+      font-size: 7.5pt;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.8px;
       color: #6b21a8;
       background: #f3e8ff;
       border: 1px solid #e9d5ff;
-      padding: 3px 10px;
+      padding: 2px 8px;
       border-radius: 999px;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
     }}
     .diag-badge {{
       display: inline-block;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      font-size: 8pt;
+      font-size: 7.5pt;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.8px;
       color: #1e40af;
       background: #dbeafe;
       border: 1px solid #bfdbfe;
-      padding: 3px 10px;
+      padding: 2px 8px;
       border-radius: 999px;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
     }}
     .figure-img-wrap {{
       display: inline-block;
       max-width: 100%;
-      background: #fafafa;
-      padding: 6px;
+      background: #f8fafc;
+      padding: 4px;
       border-radius: 6px;
-      border: 1px solid #f1f5f9;
+      border: 1px solid #e2e8f0;
     }}
     .figure-img {{
       max-width: 100%;
-      max-height: 260px;
+      max-height: 135px;
       object-fit: contain;
       border-radius: 4px;
     }}
     .figure-caption {{
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      font-size: 9pt;
+      font-size: 8.5pt;
       color: #475569;
-      margin: 8px 0 4px;
+      margin: 6px 0 2px;
     }}
     .figure-explanation {{
-      font-size: 9.5pt;
-      color: #334155;
-      text-align: left;
-      line-height: 1.6;
-      margin: 8px 10px 4px;
-      padding-top: 8px;
+      font-size: 8.5pt;
+      color: #64748b;
+      text-align: center;
+      line-height: 1.4;
+      margin: 4px 6px 2px;
+      padding-top: 4px;
       border-top: 1px solid #f1f5f9;
+    }}
+
+    /* ── Definitions Box ── */
+    .definitions-box {{
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-left: 4px solid #0284c7;
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin: 14px 0;
+      break-inside: avoid;
+    }}
+    .definitions-header {{
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 9pt;
+      font-weight: 700;
+      color: #0369a1;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 8px;
+    }}
+    .definitions-list {{
+      margin: 0;
+      padding: 0;
+    }}
+    .def-entry {{
+      margin-bottom: 7px;
+      font-size: 9.5pt;
+      line-height: 1.5;
+    }}
+    .def-entry dt {{
+      font-weight: 700;
+      color: #0f172a;
+      display: inline;
+    }}
+    .def-entry dd {{
+      display: inline;
+      margin-left: 6px;
+      color: #334155;
     }}
 
     /* ── Chapter Body ── */
@@ -863,21 +926,22 @@ def build_study_guide_pdf(
                 safe_multi(intro, h=5)
                 pdf.ln(2)
 
-            # Figures
+            # Figures (Compact reference exhibits)
             for fig in (getattr(ch, "associated_figures", []) or []):
                 img_path = getattr(fig, "image_path", None) if not isinstance(fig, dict) else fig.get("image_path")
                 if img_path and os.path.exists(img_path):
                     try:
                         pdf.ln(2)
-                        pdf.set_x(pdf.l_margin)
-                        pdf.image(img_path, w=min(140, pdf.epw))
+                        fig_w = min(85, pdf.epw)
+                        fig_x = pdf.l_margin + (pdf.epw - fig_w) / 2
+                        pdf.image(img_path, x=fig_x, w=fig_w)
                         pdf.ln(1)
                         caption = getattr(fig, "caption", "") if not isinstance(fig, dict) else fig.get("caption", "")
                         if caption:
                             pdf.set_font(font_family, "I", 8)
                             pdf.set_text_color(100, 116, 139)
                             safe_multi(f"Figure: {caption}", h=4)
-                            pdf.ln(2)
+                            pdf.ln(1)
                     except Exception as img_err:
                         log.debug("Fallback PDF image render skipped: %s", img_err)
 
@@ -888,6 +952,23 @@ def build_study_guide_pdf(
                 if p and str(p).strip():
                     safe_multi(str(p).strip(), h=5)
                     pdf.ln(2)
+
+            # Core Definitions
+            core_defs = getattr(ch, "core_definitions", [])
+            if core_defs:
+                pdf.ln(1)
+                pdf.set_font(font_family, "B", 9)
+                pdf.set_text_color(2, 132, 199)
+                safe_cell("Core Definitions & Terminology:", h=5)
+                pdf.set_font(font_family, "", 8)
+                pdf.set_text_color(30, 41, 59)
+                for d in core_defs:
+                    if isinstance(d, dict):
+                        t = str(d.get("term", "")).strip()
+                        df = str(d.get("definition", "")).strip()
+                        if t and df:
+                            safe_multi(f"  * {t}: {df}", h=4)
+                pdf.ln(2)
 
             # Formulas
             formulas = getattr(ch, "latex_formulas", [])
@@ -986,6 +1067,22 @@ def build_study_guide_pdf(
                 if p and str(p).strip():
                     emergency_pdf.multi_cell(0, 5, _clean_text_for_pdf(str(p).strip()))
                     emergency_pdf.ln(2)
+
+            c_defs = getattr(ch, "core_definitions", [])
+            if c_defs:
+                emergency_pdf.set_font("Helvetica", "B", 9)
+                try:
+                    emergency_pdf.cell(0, 5, "Core Terminology:", new_x="LMARGIN", new_y="NEXT")
+                except TypeError:
+                    emergency_pdf.cell(0, 5, "Core Terminology:", ln=True)
+                emergency_pdf.set_font("Helvetica", "", 9)
+                for d in c_defs:
+                    if isinstance(d, dict):
+                        t = _clean_text_for_pdf(str(d.get("term", "")).strip())
+                        df = _clean_text_for_pdf(str(d.get("definition", "")).strip())
+                        if t and df:
+                            emergency_pdf.multi_cell(0, 4, f"  * {t}: {df}")
+                emergency_pdf.ln(2)
 
             formulas = getattr(ch, "latex_formulas", [])
             if formulas:

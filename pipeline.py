@@ -662,6 +662,7 @@ def run_pipeline(job_id: str, video_url: str, jobs_root: Path, gemini_api_key: s
                     gemini_api_key=gemini_api_key,
                     crops_dir=crops_dir,
                     gemini_model="gemini-2.0-flash",
+                    video_title=video_title,
                 )
                 guide_pdf_path = job_dir / "study_guide.pdf"
                 build_study_guide_pdf(

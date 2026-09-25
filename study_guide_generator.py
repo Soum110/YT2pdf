@@ -47,6 +47,7 @@ class StudyGuideChapter:
     subtitle: str
     introduction: str
     content_paragraphs: List[str] = field(default_factory=list)
+    core_definitions: List[Dict[str, str]] = field(default_factory=list)
     latex_formulas: List[Dict[str, str]] = field(default_factory=list)
     associated_figures: List[CuratedFigure] = field(default_factory=list)
     key_takeaways: List[str] = field(default_factory=list)
@@ -59,6 +60,56 @@ class LectureStudyGuide:
     lecture_summary: str
     chapters: List[StudyGuideChapter] = field(default_factory=list)
     all_figures: List[CuratedFigure] = field(default_factory=list)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Audio Optimization for Gemini Multimodal API
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _compress_audio_for_gemini(audio_path: Union[str, Path], temp_dir: Optional[Path] = None) -> Optional[Path]:
+    """
+    Compresses an audio file to 32kbps mono 16kHz MP3 using ffmpeg.
+    Reduces a 30-min audio from ~35MB to ~7MB, allowing instant inline_data transmission to Gemini.
+    """
+    audio_path = Path(audio_path)
+    if not audio_path.exists() or audio_path.stat().st_size == 0:
+        return None
+
+    import shutil
+    import subprocess
+    ffmpeg_bin = shutil.which("ffmpeg") or "/usr/bin/ffmpeg"
+    if not os.path.exists(ffmpeg_bin) and not shutil.which("ffmpeg"):
+        log.warning("ffmpeg not found; using uncompressed audio.")
+        return audio_path
+
+    target_dir = Path(temp_dir or "/tmp")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    out_mp3 = target_dir / f"gemini_compressed_{audio_path.stem}.mp3"
+
+    cmd = [
+        ffmpeg_bin if os.path.exists(ffmpeg_bin) else "ffmpeg",
+        "-y",
+        "-i", str(audio_path),
+        "-vn",
+        "-ac", "1",
+        "-ar", "16000",
+        "-b:a", "32k",
+        str(out_mp3),
+    ]
+    try:
+        orig_mb = audio_path.stat().st_size / (1024 * 1024)
+        log.info("Compressing audio for Gemini: %s (%.1f MB) -> %s", audio_path.name, orig_mb, out_mp3.name)
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=90)
+        if res.returncode == 0 and out_mp3.exists() and out_mp3.stat().st_size > 500:
+            comp_mb = out_mp3.stat().st_size / (1024 * 1024)
+            log.info("Audio compressed successfully: %.1f MB -> %.1f MB", orig_mb, comp_mb)
+            return out_mp3
+        else:
+            log.warning("ffmpeg audio compression failed (rc=%d): %s", res.returncode, res.stderr.decode("utf-8", errors="ignore")[:250])
+    except Exception as e:
+        log.warning("Audio compression error: %s", e)
+
+    return audio_path
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -92,47 +143,68 @@ def _crop_clean_diagram(image_path: Union[str, Path], output_path: Union[str, Pa
 # Gemini System Prompt & Schema
 # ─────────────────────────────────────────────────────────────────────────────
 
-STUDY_GUIDE_SYSTEM_PROMPT = """You are a distinguished university professor and world-class academic textbook author.
-Your mission is to synthesize the provided educational lecture material (slides, transcripts, and/or audio)
-into a rigorous, publication-grade academic study guide.
+STUDY_GUIDE_SYSTEM_PROMPT = """You are a distinguished university professor, world-class educator, and academic textbook author.
+Your mission is to synthesize the provided educational material (slides, transcripts, and/or audio) into a rigorous, comprehensive, publication-grade academic study guide.
 
-Structure the study guide chronologically from basic foundational intuition to advanced rigorous theory.
+IMPORTANT PEDAGOGICAL OBJECTIVES:
+1. PROGRESSION FROM BASIC TO ADVANCED:
+   Structure the study guide chronologically and pedagogically across 3 to 5 thematic chapters that take the learner on a complete journey:
+   - Tier 1: Foundations & Core Concepts (Basic) — Plain-English intuition, foundational problem statement, key definitions, real-world analogies, and prerequisite context.
+   - Tier 2: Mechanics, Architecture & Methodology (Intermediate) — Detailed operational breakdown, components, step-by-step mechanisms, workflows, and technical specifications.
+   - Tier 3: In-Depth Analysis, Comparative Evaluation & Nuances (Advanced) — Edge cases, trade-offs, performance characteristics, comparative analysis, and technical subtleties.
+   - Tier 4: Practical Applications, Industry Insights & Review (Mastery) — Real-world implementations, common pitfalls/anti-patterns, synthesis, and high-yield examination/interview takeaways.
+
+2. SUBSTANTIVE, HIGH-DENSITY TEXTBOOK QUALITY:
+   - Write thorough, multi-paragraph explanations (minimum 3 to 5 comprehensive paragraphs per chapter).
+   - Use concrete facts, terminology, data points, and insights directly from the lecture material.
+   - Do NOT produce superficial one-sentence summaries or placeholder text. The reader should be able to master the entire subject solely from this guide.
+
+3. ACCURATE FORMULATIONS & DEFINITIONS:
+   - Include core definitions for essential terms introduced in each chapter.
+   - If the topic is mathematical/scientific, provide clean LaTeX formulas with clear variable descriptions.
+   - If the topic is non-mathematical (e.g. system architecture, software, product analysis, humanities), provide clear structural rules or technical metrics.
 
 You must return ONLY a valid JSON object matching this exact schema:
 {
   "video_title": "<Concise Academic Title>",
-  "lecture_summary": "<Executive Lecture Summary & Pedagogical Overview (2-3 rich paragraphs)>",
+  "lecture_summary": "<Executive Lecture Summary & Pedagogical Overview (2-3 substantive paragraphs outlining core narrative)>",
   "chapters": [
     {
       "chapter_num": 1,
-      "title": "<Thematic Chapter Title>",
-      "subtitle": "<Subtopic or Theoretical Scope>",
-      "introduction": "<Pedagogical motivation & problem statement>",
+      "title": "<Thematic Chapter Title (e.g. Foundations of ...)>",
+      "subtitle": "<Pedagogical Scope (e.g. Basic Intuition & Core Principles)>",
+      "introduction": "<Pedagogical motivation & framing>",
+      "core_definitions": [
+        {
+          "term": "<Key Term or Concept>",
+          "definition": "<Clear, concise, textbook-grade definition>"
+        }
+      ],
       "content_paragraphs": [
-        "<Detailed theoretical explanation, definitions, and logical progression (Paragraph 1)>",
-        "<In-depth derivations, mechanisms, architecture details, and edge cases (Paragraph 2)>",
-        "<Comparative analysis, implications, and synthesis (Paragraph 3)>"
+        "<Substantive foundational explanation with intuitive analogies (Paragraph 1)>",
+        "<In-depth mechanisms, architectures, or step-by-step progression (Paragraph 2)>",
+        "<Comparative analysis, trade-offs, and advanced nuances (Paragraph 3)>",
+        "<Practical synthesis and domain implications (Paragraph 4)>"
       ],
       "latex_formulas": [
         {
-          "formula": "<Raw LaTeX equation e.g. \\nabla L(\\theta) = \\frac{1}{N}\\sum_{i=1}^N \\nabla l(x_i, y_i; \\theta)>",
-          "description": "<What every variable, operator, and condition represents>"
+          "formula": "<LaTeX equation or key identity, e.g. \\sigma(z) = \\frac{1}{1 + e^{-z}} (omit if not applicable to topic)>",
+          "description": "<Explanation of variables and conditions>"
         }
       ],
       "key_takeaways": [
-        "<Core takeaway 1>",
-        "<Core takeaway 2>",
-        "<Core takeaway 3>"
+        "<High-yield takeaway 1>",
+        "<High-yield takeaway 2>",
+        "<High-yield takeaway 3>"
       ],
-      "instructor_notes": "<Practical real-world advice, common student pitfalls, or examination tips>"
+      "instructor_notes": "<Practical real-world insight, common misconception, or exam review tip>"
     }
   ]
 }
 
 Formatting Rules:
-1. Formulas must be written in proper mathematical LaTeX (e.g. \\frac{a}{b}, \\sum, \\int, \\mathbb{R}, \\theta).
-2. Do NOT use markdown code fences around the JSON. Return raw parseable JSON only.
-3. Every chapter must have substantial, high-density explanations. Do not produce trivial 1-sentence summaries.
+1. Do NOT use markdown code fences around the JSON. Return raw parseable JSON only.
+2. Ensure every chapter is rich, thorough, and instructive.
 """
 
 
@@ -236,40 +308,49 @@ def generate_study_guide_content(
 
     content_parts: List[Any] = []
 
-    # A. Add Audio File if present and transcript is missing or short
+    # A. Add Audio File if present
     audio_upload_obj = None
+    compressed_audio_p = None
     if audio_file_exists:
         try:
-            audio_p = Path(audio_path)
-            file_size_mb = audio_p.stat().st_size / (1024 * 1024)
-            log.info("Attaching audio track (%s, %.1f MB) to Gemini...", audio_p.name, file_size_mb)
-            
-            # Determine mime type
-            mime_type = "audio/mp3"
-            if audio_p.suffix.lower() in [".m4a", ".mp4", ".aac"]:
-                mime_type = "audio/mp4"
-            elif audio_p.suffix.lower() in [".webm", ".opus"]:
-                mime_type = "audio/webm"
-            elif audio_p.suffix.lower() == ".wav":
-                mime_type = "audio/wav"
+            # Compress audio with ffmpeg to 32kbps mono 16kHz MP3 for instant inline_data transfer
+            compressed_audio_p = _compress_audio_for_gemini(audio_path, temp_dir=crops_dir)
+            effective_audio = Path(compressed_audio_p) if compressed_audio_p and Path(compressed_audio_p).exists() else Path(audio_path)
+            file_size_mb = effective_audio.stat().st_size / (1024 * 1024)
+            log.info("Attaching audio track (%s, %.1f MB) to Gemini...", effective_audio.name, file_size_mb)
 
-            if file_size_mb <= 15.0:
-                audio_bytes = audio_p.read_bytes()
+            mime_type = "audio/mp3" if effective_audio.suffix.lower() == ".mp3" else "audio/mp4"
+
+            if file_size_mb <= 18.0:
+                audio_bytes = effective_audio.read_bytes()
                 content_parts.append(types.Part(
                     inline_data=types.Blob(mime_type=mime_type, data=audio_bytes)
                 ))
+                log.info("Audio track attached directly as inline_data (%d bytes).", len(audio_bytes))
             else:
-                log.info("Uploading audio file to Gemini Files API...")
-                audio_upload_obj = client.files.upload(file=str(audio_p))
-                # Wait briefly for processing if needed
-                time.sleep(1.0)
-                content_parts.append(audio_upload_obj)
+                log.info("Uploading audio file to Gemini Files API (%.1f MB)...", file_size_mb)
+                audio_upload_obj = client.files.upload(file=str(effective_audio))
+                # Poll until ACTIVE with timeout
+                poll_start = time.time()
+                while time.time() - poll_start < 90:
+                    status_obj = client.files.get(name=audio_upload_obj.name)
+                    state = getattr(getattr(status_obj, "state", None), "name", str(getattr(status_obj, "state", "")))
+                    log.info("Gemini Files API upload state: %s", state)
+                    if state == "ACTIVE":
+                        break
+                    elif state == "FAILED":
+                        log.warning("Gemini file upload failed: %s", status_obj)
+                        audio_upload_obj = None
+                        break
+                    time.sleep(2.0)
+                if audio_upload_obj:
+                    content_parts.append(audio_upload_obj)
         except Exception as audio_err:
             log.warning("Could not attach audio to Gemini: %s", audio_err)
 
-    # B. Add Key Slide Images (up to 12 distinct slides to fit comfortably within context)
-    stride = max(1, len(slides) // 12) if len(slides) > 12 else 1
-    sampled_slides = slides[::stride][:12]
+    # B. Add Key Slide Images (up to 10 distinct slides to fit comfortably within context as input)
+    stride = max(1, len(slides) // 10) if len(slides) > 10 else 1
+    sampled_slides = slides[::stride][:10]
     for s in sampled_slides:
         img_p = getattr(s, "image_path", None)
         if img_p and os.path.exists(img_p):
@@ -293,18 +374,18 @@ def generate_study_guide_content(
 Duration: {int(total_duration // 60)} minutes {int(total_duration % 60)} seconds
 Number of Slides: {len(slides)}
 
-Attached:
+Input Materials:
 - {len(sampled_slides)} Visual Slide Images from the presentation.
 """
     if audio_file_exists:
-        user_prompt += "- Lecture Audio Track (Listen to the explanation, definitions, and technical notes spoken by the lecturer).\n"
+        user_prompt += "- Lecture Audio Track (Listen to the explanation, definitions, spoken facts, and technical nuances).\n"
 
     if has_transcript:
         # Cap transcript to 60,000 characters
         tr_snippet = transcript_text[:60000]
         user_prompt += f"\nLecture Transcript:\n{tr_snippet}\n"
 
-    user_prompt += "\nSynthesize a complete, publication-grade academic textbook study guide following the specified JSON schema."
+    user_prompt += "\nSynthesize a complete, publication-grade academic textbook study guide progressing from foundational basic concepts to advanced mastery, following the specified JSON schema."
     content_parts.append(types.Part(text=user_prompt))
 
     # 3. Call Gemini Model
@@ -337,6 +418,13 @@ Attached:
         except Exception:
             pass
 
+    # Clean up temporary compressed audio file if created
+    if compressed_audio_p and compressed_audio_p != Path(audio_path or "") and compressed_audio_p.exists():
+        try:
+            compressed_audio_p.unlink(missing_ok=True)
+        except Exception:
+            pass
+
     # 4. Parse JSON Response into LectureStudyGuide
     if raw_json_str:
         try:
@@ -350,16 +438,43 @@ Attached:
 
             parsed = json.loads(clean_str)
 
+            parsed_chapters = parsed.get("chapters", [])
+            num_ch = max(1, len(parsed_chapters))
+            max_figures_total = min(4, len(figures_list))
+            used_figure_indices = set()
+            total_figs_allocated = 0
+
             chapters: List[StudyGuideChapter] = []
-            for ch_dict in parsed.get("chapters", []):
-                # Associate relevant figures to chapters
-                c_num = ch_dict.get("chapter_num", len(chapters) + 1)
-                ch_figs = []
-                # Allocate a portion of figures to each chapter
-                if figures_list:
-                    figs_per_ch = max(1, len(figures_list) // max(1, len(parsed.get("chapters", [1]))))
-                    start_f = (c_num - 1) * figs_per_ch
-                    ch_figs = figures_list[start_f:start_f + figs_per_ch]
+            selected_guide_figures: List[CuratedFigure] = []
+
+            for ch_idx, ch_dict in enumerate(parsed_chapters):
+                c_num = ch_dict.get("chapter_num", ch_idx + 1)
+                
+                # Strictly limit figures: at most 1 distinct figure per chapter, max 4 overall
+                ch_figs: List[CuratedFigure] = []
+                if figures_list and total_figs_allocated < max_figures_total:
+                    cand_idx = int(ch_idx * (len(figures_list) / num_ch))
+                    while cand_idx in used_figure_indices and cand_idx < len(figures_list):
+                        cand_idx += 1
+                    if cand_idx < len(figures_list) and cand_idx not in used_figure_indices:
+                        base_fig = figures_list[cand_idx]
+                        curated_ch_fig = CuratedFigure(
+                            fig_id=f"fig_ch{c_num}",
+                            title=base_fig.title,
+                            caption=f"Reference Exhibit: {base_fig.title}",
+                            explanation=f"Key visual model illustrating concepts in Chapter {c_num}.",
+                            image_path=base_fig.image_path,
+                            timestamp_sec=base_fig.timestamp_sec,
+                            fig_type="diagram",
+                        )
+                        ch_figs = [curated_ch_fig]
+                        selected_guide_figures.append(curated_ch_fig)
+                        used_figure_indices.add(cand_idx)
+                        total_figs_allocated += 1
+
+                core_defs = ch_dict.get("core_definitions", [])
+                if not isinstance(core_defs, list):
+                    core_defs = []
 
                 chapters.append(StudyGuideChapter(
                     chapter_num=c_num,
@@ -367,6 +482,7 @@ Attached:
                     subtitle=ch_dict.get("subtitle", ""),
                     introduction=ch_dict.get("introduction", ""),
                     content_paragraphs=ch_dict.get("content_paragraphs", []),
+                    core_definitions=core_defs,
                     latex_formulas=ch_dict.get("latex_formulas", []),
                     associated_figures=ch_figs,
                     key_takeaways=ch_dict.get("key_takeaways", []),
@@ -377,9 +493,9 @@ Attached:
                 video_title=parsed.get("video_title", video_title) or video_title,
                 lecture_summary=parsed.get("lecture_summary", ""),
                 chapters=chapters,
-                all_figures=figures_list,
+                all_figures=selected_guide_figures,
             )
-            log.info("Successfully synthesized study guide with %d chapters and %d figures.", len(chapters), len(figures_list))
+            log.info("Successfully synthesized study guide with %d chapters and %d curated figures.", len(chapters), len(selected_guide_figures))
             return guide
 
         except Exception as parse_err:
@@ -433,12 +549,18 @@ def generate_deterministic_study_guide(
 
     transcript_text = _format_transcript_text(transcript_segments)
 
-    # Determine chapter breakdown (3 to 6 chapters based on slide count)
+    # Determine chapter breakdown (3 to 5 chapters based on slide count)
     num_slides = max(1, len(slides))
-    num_chapters = min(6, max(2, (num_slides + 3) // 4))
+    num_chapters = min(5, max(3, (num_slides + 3) // 4))
     chunk_size = (num_slides + num_chapters - 1) // num_chapters
 
+    used_figure_indices = set()
+    total_figs_allocated = 0
+    max_figures_total = min(4, len(figures_list))
+
     chapters: List[StudyGuideChapter] = []
+    selected_guide_figures: List[CuratedFigure] = []
+
     for c_idx in range(num_chapters):
         c_num = c_idx + 1
         start_i = c_idx * chunk_size
@@ -448,39 +570,60 @@ def generate_deterministic_study_guide(
             continue
 
         c_title = getattr(ch_slides[0], "slide_title", f"Thematic Module {c_num}")
-        c_sub = f"Covering {len(ch_slides)} slide sections from time {int(getattr(ch_slides[0], 'timestamp_sec', 0)//60)}m"
+        c_sub = f"Pedagogical Module covering lecture timeline from {int(getattr(ch_slides[0], 'timestamp_sec', 0)//60)}m"
 
         paragraphs = [
-            f"This section focuses on {c_title}. The lecture systematically covers the core definitions, theoretical underpinnings, and contextual frameworks necessary for a rigorous understanding of the subject matter.",
-            f"Throughout this module, visual models and structured concepts illustrate the relationships between key parameters. Careful examination of the slide formulations reveals how the components interact under standard operating conditions.",
+            f"This section establishes the foundational framework for {c_title}. The lecture systematically covers the fundamental definitions, theoretical underpinnings, and contextual background necessary for a comprehensive understanding of the subject matter.",
+            f"Throughout this module, structured concepts and systematic principles illustrate the relationships between key parameters. Careful examination reveals how the core components interact under standard operating conditions.",
+            f"In practical applications, these concepts guide implementation decisions and trade-offs. Mastering these foundational principles is essential before proceeding to the advanced technical analyses covered later in this guide.",
         ]
 
         if transcript_text:
-            # Grab a portion of the transcript corresponding to this chapter
             tr_lines = transcript_text.split("\n")
             lines_per_ch = max(1, len(tr_lines) // num_chapters)
-            ch_tr_snippet = " ".join(tr_lines[c_idx * lines_per_ch : (c_idx + 1) * lines_per_ch][:8])
+            ch_tr_snippet = " ".join(tr_lines[c_idx * lines_per_ch : (c_idx + 1) * lines_per_ch][:12])
             if ch_tr_snippet.strip():
-                paragraphs.append(f"Lecturer Context: {ch_tr_snippet[:350]}...")
+                paragraphs.append(f"Lecturer Detailed Analysis: {ch_tr_snippet[:450]}...")
 
-        ch_figs = [f for f in figures_list if any(getattr(s, "slide_title", "") == f.title for s in ch_slides)]
-        if not ch_figs and figures_list:
-            ch_figs = figures_list[start_i:end_i]
+        # Select at most 1 distinct figure per chapter, capped at max_figures_total
+        ch_figs: List[CuratedFigure] = []
+        if figures_list and total_figs_allocated < max_figures_total:
+            cand_idx = int(c_idx * (len(figures_list) / num_chapters))
+            while cand_idx in used_figure_indices and cand_idx < len(figures_list):
+                cand_idx += 1
+            if cand_idx < len(figures_list) and cand_idx not in used_figure_indices:
+                cand_fig = figures_list[cand_idx]
+                curated_fig = CuratedFigure(
+                    fig_id=f"fig_det_ch{c_num}",
+                    title=cand_fig.title,
+                    caption=f"Reference Exhibit: {cand_fig.title}",
+                    explanation=f"Key technical visual model referenced in Chapter {c_num}.",
+                    image_path=cand_fig.image_path,
+                    timestamp_sec=cand_fig.timestamp_sec,
+                    fig_type="diagram",
+                )
+                ch_figs = [curated_fig]
+                selected_guide_figures.append(curated_fig)
+                used_figure_indices.add(cand_idx)
+                total_figs_allocated += 1
 
         chapters.append(StudyGuideChapter(
             chapter_num=c_num,
             title=c_title,
             subtitle=c_sub,
-            introduction=f"Introduction to {c_title} and foundational principles.",
+            introduction=f"Foundational introduction to {c_title} and core principles.",
             content_paragraphs=paragraphs,
+            core_definitions=[
+                {"term": c_title, "definition": f"Core thematic concept and analytical framework explored in Chapter {c_num}."}
+            ],
             latex_formulas=[],
             associated_figures=ch_figs,
             key_takeaways=[
-                f"Core understanding of {c_title} is established through progressive visual slides.",
+                f"Core understanding of {c_title} is established through progressive visual concepts.",
                 "Systematic relationships between lecture components must be verified against experimental conditions.",
                 "Review the corresponding visual diagrams and formulas for complete conceptual mastery."
             ],
-            instructor_notes=f"Pay particular attention to the transition points in {c_title} during examination review."
+            instructor_notes=f"Pay particular attention to the core definitions and transition points in {c_title}."
         ))
 
     summary = (
@@ -493,5 +636,5 @@ def generate_deterministic_study_guide(
         video_title=video_title,
         lecture_summary=summary,
         chapters=chapters,
-        all_figures=figures_list,
+        all_figures=selected_guide_figures,
     )
