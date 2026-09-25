@@ -733,11 +733,14 @@ def run_pipeline_from_frames(
     jobs_root: Path,
     gemini_api_key: str,
     client_transcript: Optional[list] = None,
+    audio_url: Optional[str] = None,
+    audio_data: Optional[str] = None,
+    audio_mime: Optional[str] = "audio/mp4",
 ):
     """
     Orchestration pipeline for client-captured frames (YT2PDF Slide Companion Extension).
     Directly processes browser-captured frames, bypassing YouTube datacenter bot detection.
-    Runs AI verification or deduplication, builds slides PDF, and optionally compiles a study guide.
+    Runs AI verification or deduplication, builds slides PDF, and compiles a comprehensive study guide.
     """
     import base64
     from slide_extractor import CandidateFrame, ExtractorConfig, pass2_ai_verify, save_slides, VerifiedSlide
@@ -860,6 +863,45 @@ def run_pipeline_from_frames(
             "slide_count": len(verified),
         }))
 
+        # Handle Audio Track (decoded base64, server fetch from audio_url, or uploaded file)
+        audio_file_candidate = None
+        for cand_name in ["audio.mp4", "audio.webm", "audio.mp3", "audio.m4a"]:
+            if (job_dir / cand_name).exists() and (job_dir / cand_name).stat().st_size > 1000:
+                audio_file_candidate = job_dir / cand_name
+                break
+
+        if not audio_file_candidate and audio_data:
+            try:
+                audio_ext = ".webm" if "webm" in (audio_mime or "") else ".mp4"
+                audio_file_candidate = job_dir / f"audio{audio_ext}"
+                b64_aud = audio_data.split(",", 1)[1] if "," in audio_data else audio_data
+                audio_file_candidate.write_bytes(base64.b64decode(b64_aud))
+                log.info("[%s] Decoded audio_data (%d bytes)", job_id, audio_file_candidate.stat().st_size)
+            except Exception as aud_dec_err:
+                log.warning("[%s] Failed to decode audio_data: %s", job_id, aud_dec_err)
+                audio_file_candidate = None
+
+        if not audio_file_candidate and audio_url:
+            try:
+                import urllib.request
+                log.info("[%s] Attempting server download of audio_url...", job_id)
+                audio_ext = ".webm" if "webm" in (audio_mime or "") else ".mp4"
+                temp_aud = job_dir / f"audio{audio_ext}"
+                req = urllib.request.Request(audio_url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=12) as response, open(temp_aud, "wb") as out_f:
+                    # Stream up to 25MB
+                    written = 0
+                    while chunk := response.read(65536):
+                        out_f.write(chunk)
+                        written += len(chunk)
+                        if written > 25 * 1024 * 1024:
+                            break
+                if temp_aud.stat().st_size > 1000:
+                    audio_file_candidate = temp_aud
+                    log.info("[%s] Downloaded audio track (%d bytes)", job_id, audio_file_candidate.stat().st_size)
+            except Exception as aud_dl_err:
+                log.debug("[%s] audio_url server fetch notice: %s", job_id, aud_dl_err)
+
         # Generate Comprehensive Study Guide with Gemini
         guide_ready = False
         crops_dir = job_dir / "diagram_crops"
@@ -873,7 +915,8 @@ def run_pipeline_from_frames(
 
         if gemini_api_key and gemini_api_key != "YOUR_GEMINI_API_KEY_HERE":
             try:
-                log.info("[%s] Synthesizing companion study guide with Gemini (%d transcript segments)...", job_id, len(transcript_segments))
+                log.info("[%s] Synthesizing companion study guide with Gemini (%d transcript segments, audio=%s)...",
+                         job_id, len(transcript_segments), bool(audio_file_candidate))
                 from study_guide_generator import generate_study_guide_content
                 from pdf_study_guide import build_study_guide_pdf
 
@@ -884,6 +927,8 @@ def run_pipeline_from_frames(
                     gemini_api_key=gemini_api_key,
                     crops_dir=crops_dir,
                     gemini_model="gemini-2.0-flash",
+                    audio_path=audio_file_candidate,
+                    video_title=video_title,
                 )
                 guide_pdf_path = job_dir / "study_guide.pdf"
                 build_study_guide_pdf(
@@ -924,7 +969,7 @@ def run_pipeline_from_frames(
                 "slide_count": len(verified),
             }))
 
-        # Cache completed job
+        # Cache completed job in 5TB storage
         try:
             from drive_cache import cache_manager, extract_youtube_id
             vid_id = extract_youtube_id(video_url)
@@ -935,5 +980,216 @@ def run_pipeline_from_frames(
 
     except Exception as e:
         log.exception("[%s] Companion pipeline failed: %s", job_id, e)
+        _write_status(job_dir, "failed", 0, "Processing failed.", error=str(e))
+
+
+def run_pipeline_from_video_file(
+    job_id: str,
+    video_path: Path,
+    jobs_root: Path,
+    gemini_api_key: str,
+):
+    """
+    Orchestration pipeline for user-uploaded video files (.mp4, .mov, .webm, .mkv).
+    Generates presentation slides PDF and comprehensive AI study guide PDF.
+    Session-based ephemeral only (NOT stored in global 5TB cache).
+    """
+    job_dir = jobs_root / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    slides_dir = job_dir / "slides"
+    slides_dir.mkdir(parents=True, exist_ok=True)
+    crops_dir = job_dir / "diagram_crops"
+    crops_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        video_title = video_path.stem.replace("_", " ").title()
+        log.info("[%s] Video upload pipeline starting for %s", job_id, video_path.name)
+        _write_status(job_dir, "analyzing_video", 15, "Analyzing uploaded video format and streams...")
+
+        # 1. Probe video metadata with OpenCV
+        import cv2
+        cap = cv2.VideoCapture(str(video_path))
+        if not cap.isOpened():
+            raise IOError(f"Cannot open video file: {video_path}")
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        duration = total_frames / fps if fps > 0 else 0.0
+        cap.release()
+
+        # Save meta.json
+        meta = {
+            "title": video_title,
+            "duration": duration,
+            "source": "video_upload",
+            "filename": video_path.name,
+        }
+        (job_dir / "meta.json").write_text(json.dumps(meta, indent=2))
+
+        # 2. Extract audio track using ffmpeg
+        audio_path = job_dir / "audio.mp3"
+        try:
+            log.info("[%s] Extracting audio with ffmpeg...", job_id)
+            cmd = [
+                "ffmpeg", "-y", "-i", str(video_path),
+                "-vn", "-acodec", "libmp3lame", "-q:a", "4",
+                "-ar", "24000", "-ac", "1",
+                str(audio_path)
+            ]
+            subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False, timeout=120)
+            if audio_path.exists() and audio_path.stat().st_size > 1000:
+                log.info("[%s] Audio extracted: %s (%d bytes)", job_id, audio_path, audio_path.stat().st_size)
+            else:
+                audio_path = None
+        except Exception as ff_err:
+            log.warning("[%s] ffmpeg audio extraction skipped: %s", job_id, ff_err)
+            audio_path = None
+
+        # 3. CV Candidate Detection (Pass 1)
+        from slide_extractor import ExtractorConfig, pass1_find_candidates, pass2_ai_verify, save_slides, VerifiedSlide
+        from pdf_builder import build_pdf
+
+        sample_fps = 1.0
+        if duration > 21600:
+            sample_fps = 0.1
+        elif duration > 7200:
+            sample_fps = 0.2
+        elif duration > 3600:
+            sample_fps = 0.5
+
+        config = ExtractorConfig(
+            sample_fps=sample_fps,
+            ssim_threshold=0.94,
+            debounce_seconds=2,
+            gemini_api_key=gemini_api_key,
+            gemini_model="gemini-2.0-flash",
+            output_dir=slides_dir,
+            save_candidates=False,
+        )
+
+        _write_status(job_dir, "cv_scanning", 30, "Scanning video frames with OpenCV...")
+        total_sampled = max(1, int(total_frames / max(1, int(fps / config.sample_fps))))
+
+        def p1_cb(frame_count, total, ts):
+            pct = 30 + int((frame_count / total) * 30)  # 30-60%
+            _write_status(job_dir, "cv_scanning", min(pct, 60), f"Scanning frames... {frame_count}/{total}")
+
+        candidates = pass1_find_candidates(str(video_path), config, progress_cb=p1_cb)
+        log.info("[%s] Pass 1 complete: %d candidates found", job_id, len(candidates))
+
+        if not candidates:
+            _write_status(job_dir, "failed", 0, "No slides detected in uploaded video.", error="No slides found")
+            return
+
+        # 4. AI Verification (Pass 2)
+        verified = []
+        if gemini_api_key and gemini_api_key != "YOUR_GEMINI_API_KEY_HERE":
+            _write_status(job_dir, "ai_verifying", 62, f"AI verifying {len(candidates)} candidate frames...")
+
+            def p2_cb(i, total):
+                pct = 62 + int((i / total) * 20)  # 62-82%
+                _write_status(job_dir, "ai_verifying", min(pct, 82), f"AI verifying frame {i} of {total}...")
+
+            try:
+                verified = pass2_ai_verify(candidates, config, progress_cb=p2_cb)
+            except Exception as ai_err:
+                log.warning("[%s] AI verification error: %s. Using all candidates.", job_id, ai_err)
+                verified = []
+
+        if not verified:
+            for idx, c in enumerate(candidates, 1):
+                total_sec = int(c.timestamp_sec)
+                mins = total_sec // 60
+                secs = total_sec % 60
+                verified.append(VerifiedSlide(
+                    frame_index=c.frame_index,
+                    timestamp_sec=c.timestamp_sec,
+                    image_or_path=c.image_path,
+                    slide_title=f"Slide {idx} ({mins}:{secs:02d})",
+                    is_slide=True,
+                    is_new_content=True,
+                ))
+
+        # 5. Save Slides & Build Presentation Slides PDF
+        _write_status(job_dir, "building_pdf", 84, f"Saving {len(verified)} slide images...")
+        saved_paths = save_slides(verified, slides_dir)
+        for s_obj, p in zip(verified, saved_paths):
+            s_obj.image_path = Path(p)
+
+        slides_pdf_path = job_dir / "output.pdf"
+        titles = [s.slide_title for s in verified]
+        build_pdf(
+            image_paths=saved_paths,
+            slide_titles=titles,
+            output_path=slides_pdf_path,
+            video_title=video_title,
+            include_cover=True,
+        )
+        log.info("[%s] Slides PDF ready: %s", job_id, slides_pdf_path)
+
+        _write_status(job_dir, "completed", 100, f"Done! {len(verified)} slides extracted.", slide_count=len(verified))
+        (job_dir / "outputs.json").write_text(json.dumps({
+            "slides_pdf": True,
+            "study_guide_pdf": False,
+            "slide_count": len(verified),
+        }))
+
+        # 6. Generate Comprehensive AI Study Guide
+        guide_ready = False
+        if gemini_api_key and gemini_api_key != "YOUR_GEMINI_API_KEY_HERE":
+            try:
+                log.info("[%s] Synthesizing study guide for uploaded video...", job_id)
+                from study_guide_generator import generate_study_guide_content
+                from pdf_study_guide import build_study_guide_pdf
+
+                study_guide = generate_study_guide_content(
+                    slides=verified,
+                    transcript_segments=[],
+                    total_duration=float(duration),
+                    gemini_api_key=gemini_api_key,
+                    crops_dir=crops_dir,
+                    gemini_model="gemini-2.0-flash",
+                    audio_path=audio_path,
+                    video_title=video_title,
+                )
+                guide_pdf_path = job_dir / "study_guide.pdf"
+                build_study_guide_pdf(
+                    study_guide=study_guide,
+                    output_path=guide_pdf_path,
+                    video_title=video_title,
+                )
+                guide_ready = guide_pdf_path.exists() and guide_pdf_path.stat().st_size > 1500
+            except Exception as guide_err:
+                log.warning("[%s] Uploaded video study guide synthesis error: %s", job_id, guide_err)
+
+        if not guide_ready and verified:
+            try:
+                from study_guide_generator import generate_deterministic_study_guide
+                from pdf_study_guide import build_study_guide_pdf
+                det_guide = generate_deterministic_study_guide(
+                    slides=verified,
+                    transcript_segments=[],
+                    video_title=video_title,
+                    total_duration=float(duration),
+                    crops_dir=crops_dir,
+                )
+                guide_pdf_path = job_dir / "study_guide.pdf"
+                build_study_guide_pdf(
+                    study_guide=det_guide,
+                    output_path=guide_pdf_path,
+                    video_title=video_title,
+                )
+                guide_ready = guide_pdf_path.exists() and guide_pdf_path.stat().st_size > 1500
+            except Exception as det_err:
+                log.warning("[%s] Deterministic study guide error: %s", job_id, det_err)
+
+        if guide_ready:
+            (job_dir / "outputs.json").write_text(json.dumps({
+                "slides_pdf": True,
+                "study_guide_pdf": True,
+                "slide_count": len(verified),
+            }))
+
+    except Exception as e:
+        log.exception("[%s] Video upload pipeline failed: %s", job_id, e)
         _write_status(job_dir, "failed", 0, "Processing failed.", error=str(e))
 

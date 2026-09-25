@@ -19,7 +19,7 @@ from pathlib import Path
 
 import aiofiles
 from typing import Any, Dict, List, Optional
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Query, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -192,6 +192,9 @@ class CompanionUploadRequest(BaseModel):
     duration: Optional[float] = 0.0
     frames: list[CompanionFrame]
     transcript: Optional[list] = None
+    audio_url: Optional[str] = None
+    audio_data: Optional[str] = None
+    audio_mime: Optional[str] = "audio/mp4"
 
 
 class RebuildSlidesRequest(BaseModel):
@@ -277,6 +280,19 @@ async def upload_companion_frames(req: CompanionUploadRequest):
 
     job_id = str(uuid.uuid4())[:8]
     job_dir = JOBS_ROOT / job_id
+
+    # Check 5TB Cloud Storage / Drive Cache first
+    from drive_cache import cache_manager, extract_youtube_id
+    video_id = extract_youtube_id(req.video_url)
+    if video_id and cache_manager.get_cached_job(video_id, job_dir):
+        log.info("Instant Cache Hit for companion video %s! Serving as job %s", video_id, job_id)
+        return JSONResponse(content={
+            "job_id": job_id,
+            "status": "complete",
+            "message": "Cached! Result ready instantly.",
+            "cached": True,
+        })
+
     job_dir.mkdir(parents=True, exist_ok=True)
 
     from pipeline import _write_status, run_pipeline_from_frames
@@ -300,6 +316,9 @@ async def upload_companion_frames(req: CompanionUploadRequest):
         jobs_root=JOBS_ROOT,
         gemini_api_key=GEMINI_API_KEY,
         client_transcript=req.transcript,
+        audio_url=req.audio_url,
+        audio_data=req.audio_data,
+        audio_mime=req.audio_mime or "audio/mp4",
     )
 
     log.info("Companion job %s started for %s with %d frames", job_id, req.video_url, len(req.frames))
@@ -308,6 +327,76 @@ async def upload_companion_frames(req: CompanionUploadRequest):
         "status": "processing",
         "message": f"Successfully received {len(req.frames)} frames. Processing started."
     })
+
+
+@app.post("/api/companion/upload-audio")
+async def upload_companion_audio(
+    job_id: str = Query(...),
+    file: UploadFile = File(...),
+):
+    """Accepts uploaded audio track stream for a job from the Chrome companion extension."""
+    job_dir = JOBS_ROOT / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    audio_ext = ".mp4" if "mp4" in (file.content_type or "") else ".webm"
+    audio_path = job_dir / f"audio{audio_ext}"
+    content = await file.read()
+    with open(audio_path, "wb") as f:
+        f.write(content)
+    log.info("Companion audio saved for job %s: %s (%d bytes)", job_id, audio_path, len(content))
+    return JSONResponse(content={"status": "ok", "bytes": len(content)})
+
+
+@app.post("/api/upload-video", response_model=ProcessResponse)
+async def upload_video(file: UploadFile = File(...)):
+    """
+    Accepts direct video file upload (.mp4, .mov, .webm, .mkv).
+    Generates presentation slides PDF and comprehensive AI study guide PDF.
+    Session-based ephemeral only (NOT stored in global 5TB cache).
+    """
+    if not GEMINI_API_KEY:
+        raise HTTPException(
+            status_code=500,
+            detail="GEMINI_API_KEY environment variable is not set on the server.",
+        )
+
+    valid_exts = {".mp4", ".mov", ".webm", ".mkv", ".avi"}
+    file_ext = Path(file.filename or "video.mp4").suffix.lower()
+    if file_ext not in valid_exts:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported video format '{file_ext}'. Please upload MP4, MOV, WEBM, or MKV.",
+        )
+
+    job_id = str(uuid.uuid4())[:8]
+    job_dir = JOBS_ROOT / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+
+    dest_path = job_dir / f"source_video{file_ext}"
+    total_bytes = 0
+    with open(dest_path, "wb") as out_f:
+        while chunk := await file.read(1024 * 1024):
+            out_f.write(chunk)
+            total_bytes += len(chunk)
+
+    log.info("Uploaded video saved for job %s: %s (%d bytes)", job_id, dest_path, total_bytes)
+
+    from pipeline import _write_status, run_pipeline_from_video_file
+    _write_status(
+        job_dir,
+        "video_uploaded",
+        10,
+        f"Video uploaded ({total_bytes // (1024 * 1024)} MB). Starting slide extraction & AI synthesis...",
+    )
+
+    executor.submit(
+        run_pipeline_from_video_file,
+        job_id=job_id,
+        video_path=dest_path,
+        jobs_root=JOBS_ROOT,
+        gemini_api_key=GEMINI_API_KEY,
+    )
+
+    return ProcessResponse(job_id=job_id, message="Video uploaded successfully. Processing started.")
 
 
 @app.api_route("/api/extension/download", methods=["GET", "HEAD"])

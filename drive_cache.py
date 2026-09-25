@@ -125,6 +125,13 @@ class DriveCacheManager:
                 except Exception as e:
                     log.error("Failed to copy %s: %s", filename, e)
 
+        # Copy slides directory if present
+        if (source_dir / "slides").exists():
+            try:
+                shutil.copytree(source_dir / "slides", target_job_dir / "slides", dirs_exist_ok=True)
+            except Exception as e:
+                log.debug("Slides directory copy skipped: %s", e)
+
         # Read meta to get title & slide count
         meta_file = target_job_dir / "meta.json"
         slide_count = 0
@@ -172,6 +179,12 @@ class DriveCacheManager:
             src = job_dir / filename
             if src.exists():
                 shutil.copy2(src, local_cached_dir / filename)
+
+        if (job_dir / "slides").exists():
+            try:
+                shutil.copytree(job_dir / "slides", local_cached_dir / "slides", dirs_exist_ok=True)
+            except Exception as e:
+                log.debug("Slides directory cache store skipped: %s", e)
 
         log.info("[Cache STORE] Saved video %s to local cache.", video_id)
 

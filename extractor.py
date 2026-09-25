@@ -227,18 +227,42 @@ def pass1_find_candidates(
                 progress_cb(frame_count, total_sampled, ts)
             continue
 
-        # Compute SSIM (fast because we downscaled to 320px wide)
+        # Compute pixel difference metrics (fast downscaled 320px)
+        abs_diff = np.abs(last_gray.astype(np.float32) - gray.astype(np.float32))
+        diff_score = float(np.mean(abs_diff) / 255.0)
+        identical_ratio = float(np.mean(abs_diff < 18.0))
         score = ssim(last_gray, gray, full=False)
+
+        # Smart Instructor Motion Separation:
+        # If >= 78% of pixels match and mean difference < 0.11, it's the SAME slide,
+        # with differences caused by instructor walking, gesturing, or standing in frame.
+        is_same_slide = identical_ratio >= 0.78 and diff_score < 0.11
+        is_new_slide = not is_same_slide and (diff_score >= 0.045 or identical_ratio < 0.72 or score < config.ssim_threshold)
 
         if progress_cb:
             progress_cb(frame_count, total_sampled, ts)
 
         in_debounce = (ts - last_accepted_ts) < config.debounce_seconds
 
-        if score < config.ssim_threshold and not in_debounce:
+        if is_same_slide and candidates:
+            # Same slide! Check if current frame has higher clarity (less obstructed by instructor)
+            clarity_curr = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+            last_cand = candidates[-1]
+            last_img = last_cand.image
+            if last_img is not None:
+                last_g = to_gray_resized(last_img)
+                clarity_prev = float(cv2.Laplacian(last_g, cv2.CV_64F).var())
+                if clarity_curr > clarity_prev * 1.05:
+                    cv2.imwrite(str(last_cand.image_path), frame, [cv2.IMWRITE_JPEG_QUALITY, 92])
+                    last_cand.timestamp_sec = ts
+                    last_gray = gray
+                    last_accepted_ts = ts
+                    log.debug("  [%5.1fs] Upgraded slide #%d to cleaner unobstructed frame (clarity %.1f -> %.1f)",
+                              ts, len(candidates), clarity_prev, clarity_curr)
+        elif is_new_slide and not in_debounce:
             log.info(
-                "  [%5.1fs] SSIM=%.3f < %.2f -> CANDIDATE #%d",
-                ts, score, config.ssim_threshold, len(candidates) + 1,
+                "  [%5.1fs] New slide detected (identical=%.1f%%, diff=%.3f, SSIM=%.3f) -> CANDIDATE #%d",
+                ts, identical_ratio * 100, diff_score, score, len(candidates) + 1,
             )
             cand_path = cand_dir / f"cand_{len(candidates):04d}_t{int(ts):05d}s.jpg"
             cv2.imwrite(str(cand_path), frame, [cv2.IMWRITE_JPEG_QUALITY, 92])
@@ -246,7 +270,8 @@ def pass1_find_candidates(
             last_gray = gray
             last_accepted_ts = ts
         else:
-            log.debug("  [%5.1fs] SSIM=%.3f  skip (debounce=%s)", ts, score, in_debounce)
+            log.debug("  [%5.1fs] SSIM=%.3f diff=%.3f identical=%.1f%% skip (debounce=%s)",
+                      ts, score, diff_score, identical_ratio * 100, in_debounce)
 
     log.info("Pass 1 complete: %d candidate frames found (streamed to disk, RAM < 80MB)", len(candidates))
     return candidates

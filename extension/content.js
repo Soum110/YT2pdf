@@ -62,8 +62,26 @@
   }
 
   // ─────────────────────────────────────────────
-  // Perceptual frame difference (luminance diff + quadrant peak diff)
+  // Perceptual slide difference with instructor movement separation & visibility scoring
   // ─────────────────────────────────────────────
+  function computeClarity(canvas) {
+    const w = canvas.width || 64;
+    const h = canvas.height || 36;
+    const ctx = canvas.getContext("2d");
+    const data = ctx.getImageData(0, 0, w, h).data;
+    let edgeSum = 0;
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        const i = (y * w + x) * 4;
+        const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+        const right = 0.299 * data[i + 4] + 0.587 * data[i + 5] + 0.114 * data[i + 6];
+        const down = 0.299 * data[i + w * 4] + 0.587 * data[i + w * 4 + 1] + 0.114 * data[i + w * 4 + 2];
+        edgeSum += Math.abs(lum - right) + Math.abs(lum - down);
+      }
+    }
+    return edgeSum / ((w - 2) * (h - 2));
+  }
+
   function calculateDifference(canvasA, canvasB) {
     const w = canvasA.width || 64;
     const h = canvasA.height || 36;
@@ -73,42 +91,39 @@
     const dataB = ctxB.getImageData(0, 0, w, h).data;
 
     let totalDiff = 0;
+    let identicalPixels = 0;
     const numPixels = w * h;
     const totalBytes = numPixels * 4;
 
-    // Track 4 quadrants to detect localized additions (bullet points, math formulas, diagrams)
-    const midX = Math.floor(w / 2);
-    const midY = Math.floor(h / 2);
-    let qDiff = [0, 0, 0, 0];
-    let qPixels = [0, 0, 0, 0];
-
     for (let i = 0; i < totalBytes; i += 4) {
-      const pIdx = i / 4;
-      const px = pIdx % w;
-      const py = Math.floor(pIdx / w);
-      const qIdx = (px >= midX ? 1 : 0) + (py >= midY ? 2 : 0);
-
       const lumA = 0.299 * dataA[i] + 0.587 * dataA[i + 1] + 0.114 * dataA[i + 2];
       const lumB = 0.299 * dataB[i] + 0.587 * dataB[i + 1] + 0.114 * dataB[i + 2];
       const d = Math.abs(lumA - lumB);
       totalDiff += d;
-      qDiff[qIdx] += d;
-      qPixels[qIdx]++;
+      if (d < 18) {
+        identicalPixels++;
+      }
     }
 
     const meanDiff = totalDiff / (numPixels * 255);
-    const maxQuadrantDiff = Math.max(
-      qDiff[0] / ((qPixels[0] || 1) * 255),
-      qDiff[1] / ((qPixels[1] || 1) * 255),
-      qDiff[2] / ((qPixels[2] || 1) * 255),
-      qDiff[3] / ((qPixels[3] || 1) * 255)
-    );
+    const identicalRatio = identicalPixels / numPixels;
 
-    // Either overall slide layout changed OR a significant section/bullet/equation was added
+    const clarityA = computeClarity(canvasA);
+    const clarityB = computeClarity(canvasB);
+
+    // If >= 78% of the slide pixels match, it's the SAME slide (instructor moved/gestured)
+    const isSameSlide = identicalRatio >= 0.78 && meanDiff < 0.11;
+    // New slide if substantial change across the canvas
+    const isNewSlide = !isSameSlide && (meanDiff >= 0.045 || identicalRatio < 0.72);
+
     return {
       meanDiff,
-      maxQuadrantDiff,
-      isDistinct: meanDiff >= 0.012 || maxQuadrantDiff >= 0.030
+      identicalRatio,
+      isSameSlide,
+      isNewSlide,
+      isDistinct: isNewSlide,
+      clarityA,
+      clarityB,
     };
   }
 
@@ -304,6 +319,108 @@
     } catch (err) {
       console.warn("[YT2PDF Companion] Extract transcript failed:", err);
       return [];
+    }
+  }
+
+  // ─────────────────────────────────────────────
+  // Client-Side YouTube Audio Extraction
+  // ─────────────────────────────────────────────
+  async function extractAudioTrackFromPage() {
+    try {
+      console.log("[YT2PDF Companion] Detecting audio stream from YouTube session...");
+      const audioResult = await new Promise((resolve) => {
+        const handler = (e) => {
+          window.removeEventListener("yt2pdf_audio_reply", handler);
+          resolve(e.detail || null);
+        };
+        window.addEventListener("yt2pdf_audio_reply", handler);
+        setTimeout(() => {
+          window.removeEventListener("yt2pdf_audio_reply", handler);
+          resolve(null);
+        }, 1000);
+
+        const s = document.createElement("script");
+        s.textContent = `
+          (() => {
+            try {
+              let audioUrl = null;
+              let mimeType = "audio/mp4";
+              let bitrate = 0;
+              const player = document.getElementById("movie_player");
+              let sData = player?.getStreamingData ? player.getStreamingData() : null;
+              if (!sData && window.ytInitialPlayerResponse?.streamingData) {
+                sData = window.ytInitialPlayerResponse.streamingData;
+              }
+              if (sData?.adaptiveFormats) {
+                const audioFormats = sData.adaptiveFormats.filter(f => (f.mimeType || "").startsWith("audio/"));
+                if (audioFormats.length > 0) {
+                  const withUrl = audioFormats.filter(f => f.url);
+                  if (withUrl.length > 0) {
+                    withUrl.sort((a, b) => (a.bitrate || 0) - (b.bitrate || 0));
+                    audioUrl = withUrl[0].url;
+                    mimeType = withUrl[0].mimeType ? withUrl[0].mimeType.split(";")[0] : "audio/mp4";
+                    bitrate = withUrl[0].bitrate || 0;
+                  }
+                }
+              }
+              window.dispatchEvent(new CustomEvent("yt2pdf_audio_reply", {
+                detail: audioUrl ? { audio_url: audioUrl, mime_type: mimeType, bitrate } : null
+              }));
+            } catch(e) {
+              window.dispatchEvent(new CustomEvent("yt2pdf_audio_reply", { detail: null }));
+            }
+          })();
+        `;
+        (document.head || document.documentElement).appendChild(s);
+        s.remove();
+      });
+
+      if (audioResult && audioResult.audio_url) {
+        console.log(`[YT2PDF Companion] Audio stream found (${audioResult.mime_type}, ${audioResult.bitrate} bps).`);
+        return audioResult;
+      }
+    } catch (err) {
+      console.warn("[YT2PDF Companion] Audio track extraction notice:", err);
+    }
+    return null;
+  }
+
+  async function uploadAudioInBackground(jobId, audioUrl, backendBase) {
+    if (!jobId || !audioUrl) return;
+    try {
+      console.log(`[YT2PDF Companion] Starting background audio stream upload for job ${jobId}...`);
+      const audioResp = await fetch(audioUrl);
+      if (!audioResp.ok) {
+        console.warn(`[YT2PDF Companion] Could not fetch audio stream: ${audioResp.statusText}`);
+        return;
+      }
+      const blob = await audioResp.blob();
+      console.log(`[YT2PDF Companion] Audio stream fetched (${Math.round(blob.size / 1024)} KB). Uploading to backend...`);
+      const formData = new FormData();
+      formData.append("file", blob, "lecture_audio.mp4");
+
+      const candidateBases = [
+        backendBase || "https://yt2pdfs.com",
+        "https://yt2pdfs.com",
+        "https://yt2pdf-214301889618.europe-west1.run.app",
+        "http://localhost:8080"
+      ];
+      for (const base of candidateBases) {
+        try {
+          const res = await fetch(`${base}/api/companion/upload-audio?job_id=${jobId}`, {
+            method: "POST",
+            body: formData,
+          });
+          if (res.ok) {
+            console.log(`[YT2PDF Companion] Audio uploaded successfully to ${base} for job ${jobId}`);
+            break;
+          }
+        } catch (postErr) {
+          console.debug(`[YT2PDF Companion] Audio upload failed on ${base}:`, postErr.message);
+        }
+      }
+    } catch (e) {
+      console.warn("[YT2PDF Companion] Background audio upload notice:", e);
     }
   }
 
@@ -755,17 +872,7 @@
 
         thumbCtx.drawImage(video, 0, 0, 64, 36);
 
-        let isDistinct = false;
         if (capturedSlides.length === 0) {
-          isDistinct = true;
-        } else {
-          const diffResult = calculateDifference(thumbCanvas, lastCapturedCanvas);
-          if (diffResult.isDistinct) {
-            isDistinct = true;
-          }
-        }
-
-        if (isDistinct) {
           lastCapturedCtx.drawImage(thumbCanvas, 0, 0, 64, 36);
           captureCtx.drawImage(video, 0, 0, 1280, 720);
           capturedSlides.push({
@@ -773,6 +880,28 @@
             time_formatted: formatTimestamp(timeTarget),
             data: captureCanvas.toDataURL("image/jpeg", 0.76)
           });
+        } else {
+          const diffResult = calculateDifference(thumbCanvas, lastCapturedCanvas);
+          if (diffResult.isSameSlide) {
+            // Instructor movement detected! Check if this frame is clearer (less obstructed)
+            if (diffResult.clarityA > diffResult.clarityB * 1.05) {
+              lastCapturedCtx.drawImage(thumbCanvas, 0, 0, 64, 36);
+              captureCtx.drawImage(video, 0, 0, 1280, 720);
+              capturedSlides[capturedSlides.length - 1] = {
+                timestamp: timeTarget,
+                time_formatted: formatTimestamp(timeTarget),
+                data: captureCanvas.toDataURL("image/jpeg", 0.76)
+              };
+            }
+          } else if (diffResult.isNewSlide || diffResult.isDistinct) {
+            lastCapturedCtx.drawImage(thumbCanvas, 0, 0, 64, 36);
+            captureCtx.drawImage(video, 0, 0, 1280, 720);
+            capturedSlides.push({
+              timestamp: timeTarget,
+              time_formatted: formatTimestamp(timeTarget),
+              data: captureCanvas.toDataURL("image/jpeg", 0.76)
+            });
+          }
         }
       }
 
@@ -839,12 +968,21 @@
         console.warn("[YT2PDF Companion] Transcript extraction error:", trErr);
       }
 
+      let audioInfo = null;
+      try {
+        audioInfo = await extractAudioTrackFromPage();
+      } catch (aErr) {
+        console.warn("[YT2PDF Companion] Audio extraction notice:", aErr);
+      }
+
       const payload = {
         video_url: cleanUrl,
         title: videoTitle,
         duration: duration,
         frames: capturedSlides,
-        transcript: transcriptSegments
+        transcript: transcriptSegments,
+        audio_url: audioInfo ? audioInfo.audio_url : null,
+        audio_mime: audioInfo ? audioInfo.mime_type : "audio/mp4",
       };
 
       const notifyParentComplete = (jobId, base) => {
@@ -878,10 +1016,18 @@
         headless: true
       }, (res) => {
         if (res && res.success && res.data) {
-          notifyParentComplete(res.data.job_id, res.data.backend_base);
+          const resJobId = res.data.job_id;
+          const resBase = res.data.backend_base;
+          if (audioInfo && audioInfo.audio_url && resJobId) {
+            uploadAudioInBackground(resJobId, audioInfo.audio_url, resBase);
+          }
+          notifyParentComplete(resJobId, resBase);
         } else {
           console.warn("[YT2PDF Companion] Background worker upload failed or timed out, trying direct upload fallback...");
           directUploadFrames(payload).then((directRes) => {
+            if (audioInfo && audioInfo.audio_url && directRes.job_id) {
+              uploadAudioInBackground(directRes.job_id, audioInfo.audio_url, directRes.backend_base);
+            }
             notifyParentComplete(directRes.job_id, directRes.backend_base);
           }).catch((dErr) => {
             notifyParentError(dErr.message);
@@ -1012,26 +1158,38 @@
 
         thumbCtx.drawImage(video, 0, 0, 64, 36);
 
-        let isDistinct = false;
         if (capturedSlides.length === 0) {
-          isDistinct = true;
-        } else {
-          const diffResult = calculateDifference(thumbCanvas, lastCapturedCanvas);
-          if (diffResult.isDistinct) {
-            isDistinct = true;
-          }
-        }
-
-        if (isDistinct) {
           lastCapturedCtx.drawImage(thumbCanvas, 0, 0, 64, 36);
           captureCtx.drawImage(video, 0, 0, 1280, 720);
           const base64Data = captureCanvas.toDataURL("image/jpeg", 0.78);
-
           capturedSlides.push({
             timestamp: timeTarget,
             time_formatted: formatTimestamp(timeTarget),
             data: base64Data
           });
+        } else {
+          const diffResult = calculateDifference(thumbCanvas, lastCapturedCanvas);
+          if (diffResult.isSameSlide) {
+            // Instructor movement detected! Check if this frame is clearer (less obstructed)
+            if (diffResult.clarityA > diffResult.clarityB * 1.05) {
+              lastCapturedCtx.drawImage(thumbCanvas, 0, 0, 64, 36);
+              captureCtx.drawImage(video, 0, 0, 1280, 720);
+              capturedSlides[capturedSlides.length - 1] = {
+                timestamp: timeTarget,
+                time_formatted: formatTimestamp(timeTarget),
+                data: captureCanvas.toDataURL("image/jpeg", 0.78)
+              };
+            }
+          } else if (diffResult.isNewSlide || diffResult.isDistinct) {
+            lastCapturedCtx.drawImage(thumbCanvas, 0, 0, 64, 36);
+            captureCtx.drawImage(video, 0, 0, 1280, 720);
+            const base64Data = captureCanvas.toDataURL("image/jpeg", 0.78);
+            capturedSlides.push({
+              timestamp: timeTarget,
+              time_formatted: formatTimestamp(timeTarget),
+              data: base64Data
+            });
+          }
         }
       }
 
@@ -1101,12 +1259,21 @@
         console.warn("[YT2PDF Companion] Manual transcript extraction error:", trErr);
       }
 
+      let audioInfo = null;
+      try {
+        audioInfo = await extractAudioTrackFromPage();
+      } catch (aErr) {
+        console.warn("[YT2PDF Companion] Manual audio extraction notice:", aErr);
+      }
+
       const payload = {
         video_url: videoUrl,
         title: videoTitle,
         duration: duration,
         frames: capturedSlides,
         transcript: transcriptSegments,
+        audio_url: audioInfo ? audioInfo.audio_url : null,
+        audio_mime: audioInfo ? audioInfo.mime_type : "audio/mp4",
         redirect_on_success: true
       };
 
@@ -1114,6 +1281,9 @@
       const uploadResult = await uploadFramesSafely(payload);
 
       const jobId = uploadResult.job_id;
+      if (audioInfo && audioInfo.audio_url && jobId) {
+        uploadAudioInBackground(jobId, audioInfo.audio_url, uploadResult.backend_base);
+      }
       // Always direct users to the official domain yt2pdfs.com
       let webBase = "https://yt2pdfs.com";
       if (uploadResult.backend_base && (uploadResult.backend_base.includes("localhost") || uploadResult.backend_base.includes("127.0.0.1"))) {
