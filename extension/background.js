@@ -144,6 +144,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     target.searchParams.set("autoplay", "1");
     target.searchParams.set("mute", "1");
     target.searchParams.set("yt2pdf_headless", "1");
+    if (message.redirect_on_success) {
+      target.searchParams.set("yt2pdf_redirect", "1");
+    }
 
     console.log("[YT2PDF Background] Opening 100% silent background tab for:", target.toString());
 
@@ -176,7 +179,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse,
         timeout,
         originTabId,
-        originUrl
+        originUrl,
+        redirectOnSuccess: Boolean(message.redirect_on_success)
       });
     });
 
@@ -269,15 +273,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             data.backend_base = base;
             sendResponse({ success: true, data: data });
 
-            // Direct Redirection Guarantee: Open the website tab immediately from service worker
-            if (message.redirect_on_success || message.payload?.redirect_on_success) {
+            // Direct Redirection Guarantee: Redirect the origin tab or open foreground tab
+            const shouldRedirect = Boolean(message.redirect_on_success || message.payload?.redirect_on_success || pending?.redirectOnSuccess);
+            if (shouldRedirect) {
               let webBase = "https://yt2pdfs.com";
               if (base.includes("localhost") || base.includes("127.0.0.1")) {
                 webBase = base;
               }
               const destUrl = `${webBase}/?job_id=${data.job_id}`;
-              console.log("[YT2PDF Background] Direct foreground tab creation for:", destUrl);
-              chrome.tabs.create({ url: destUrl, active: true }, () => {});
+              console.log("[YT2PDF Background] Direct foreground redirection for:", destUrl);
+              if (pending && pending.originTabId) {
+                chrome.tabs.update(pending.originTabId, { url: destUrl }).catch(() => {
+                  chrome.tabs.create({ url: destUrl, active: true }).catch(() => {});
+                });
+              } else {
+                chrome.tabs.create({ url: destUrl, active: true }).catch(() => {});
+              }
             }
 
             if (pending) {

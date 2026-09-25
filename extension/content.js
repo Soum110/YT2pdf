@@ -1010,10 +1010,14 @@
         }
       };
 
+      const isRedirectRequested = new URLSearchParams(window.location.search).get("yt2pdf_redirect") === "1";
+      payload.redirect_on_success = isRedirectRequested;
+
       safeSendRuntimeMessage({
         action: "upload_frames",
         payload: payload,
-        headless: true
+        headless: true,
+        redirect_on_success: isRedirectRequested
       }, (res) => {
         if (res && res.success && res.data) {
           const resJobId = res.data.job_id;
@@ -1054,10 +1058,32 @@
   }
 
   // ─────────────────────────────────────────────
-  // Watch Page Slide Extraction (Manual Trigger)
+  // Watch Page Slide Extraction (Silent Background Trigger)
   // ─────────────────────────────────────────────
+  function resetButton(btn) {
+    if (!btn) btn = document.getElementById("yt2pdf-action-btn");
+    if (!btn) return;
+    isExtracting = false;
+    btn.disabled = false;
+    btn.style.opacity = "1";
+    btn.innerHTML = `
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#FF4D4D" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+        <polyline points="14 2 14 8 20 8"></polyline>
+        <line x1="16" y1="13" x2="8" y2="13"></line>
+        <line x1="16" y1="17" x2="8" y2="17"></line>
+        <polyline points="10 9 9 9 8 9"></polyline>
+      </svg>
+      <span style="font-size:14px;font-weight:500;">PDF Slides</span>
+    `;
+  }
+
   async function startSlideExtraction(buttonEl) {
-    if (isExtracting) return;
+    if (isExtracting) {
+      showToast("Slide extraction is already running silently in the background!");
+      return;
+    }
+
     const video = document.querySelector("video.html5-main-video");
     if (!video || !video.duration || isNaN(video.duration)) {
       showToast("Please wait for video to load before extracting slides.", true);
@@ -1065,283 +1091,30 @@
     }
 
     isExtracting = true;
-    const originalContent = buttonEl.innerHTML;
-    const originalTime = video.currentTime;
-    const wasPaused = video.paused;
-    const originalMuted = video.muted;
-
-    // Keep video muted and playing so Chromium decodes and repaints frames on seek
-    video.muted = true;
-    video.volume = 0;
-    try {
-      video.play().catch(() => {});
-    } catch (e) {}
-
-    try {
-      const duration = Math.floor(video.duration);
-      const titleEl = document.querySelector("h1.ytd-watch-metadata yt-formatted-string") ||
-                      document.querySelector("h1.title yt-formatted-string") ||
-                      document.querySelector("h1.title");
-      const videoTitle = titleEl ? titleEl.innerText.trim() : document.title.replace(" - YouTube", "").trim();
-      const videoUrl = window.location.href;
-
-      // Smart sample intervals based on video duration to catch all slide changes
-      let step = 8;
-      if (duration > 43200) step = 120;     // > 12 hrs: sample every 2m (~360-450 points)
-      else if (duration > 21600) step = 75; // 6-12 hrs: sample every 75s (~280-450 points)
-      else if (duration > 10800) step = 45; // 3-6 hrs: sample every 45s (~240-480 points)
-      else if (duration > 3600) step = 20;  // 1-3 hrs: sample every 20s (~180-450 points)
-      else if (duration > 1800) step = 10; // 30-60 mins (every 10s checks for 32m)
-      else if (duration > 600) step = 8;   // 10-30 mins
-      else step = 5;                       // < 10 mins
-
-      const samplePoints = [];
-      const startT = Math.max(2, Math.floor(duration * 0.005));
-      for (let t = startT; t < duration - 2; t += step) {
-        samplePoints.push(t);
-      }
-      // Always guarantee sampling the concluding minute of the lecture!
-      if (duration > 20 && (!samplePoints.length || samplePoints[samplePoints.length - 1] < duration - 15)) {
-        samplePoints.push(Math.max(2, duration - 10));
-      }
-      const finalPoints = samplePoints; // Full lecture coverage without decimation!
-
-      // Canvases
-      const captureCanvas = document.createElement("canvas");
-      captureCanvas.width = 1280;
-      captureCanvas.height = 720;
-      const captureCtx = captureCanvas.getContext("2d");
-
-      // Candidate thumbnail canvas (64x36 for crisp detail detection)
-      const thumbCanvas = document.createElement("canvas");
-      thumbCanvas.width = 64;
-      thumbCanvas.height = 36;
-      const thumbCtx = thumbCanvas.getContext("2d");
-
-      // Dedicated last-captured thumbnail canvas (eliminates alternating parity bugs)
-      const lastCapturedCanvas = document.createElement("canvas");
-      lastCapturedCanvas.width = 64;
-      lastCapturedCanvas.height = 36;
-      const lastCapturedCtx = lastCapturedCanvas.getContext("2d");
-
-      const capturedSlides = [];
-
+    if (buttonEl) {
+      buttonEl.disabled = true;
       buttonEl.style.opacity = "0.9";
-
-      for (let i = 0; i < finalPoints.length; i++) {
-        const timeTarget = finalPoints[i];
-
-        // Seek video with seeked event listener and timeout
-        await new Promise((resolve) => {
-          let done = false;
-          const onSeeked = () => {
-            if (!done) {
-              done = true;
-              video.removeEventListener("seeked", onSeeked);
-              resolve();
-            }
-          };
-          video.addEventListener("seeked", onSeeked, { once: true });
-          video.currentTime = timeTarget;
-          setTimeout(onSeeked, 450); // Generous timeout for buffer
-        });
-
-        // Brief delay for decoder to paint frame onto video texture
-        await new Promise(r => setTimeout(r, 80));
-
-        // Update button status
-        const pct = Math.round(((i + 1) / finalPoints.length) * 100);
-        buttonEl.innerHTML = `
-          <svg class="yt2pdf-spinner" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
-          <span>${pct}% (${capturedSlides.length})</span>
-        `;
-
-        thumbCtx.drawImage(video, 0, 0, 64, 36);
-
-        if (capturedSlides.length === 0) {
-          lastCapturedCtx.drawImage(thumbCanvas, 0, 0, 64, 36);
-          captureCtx.drawImage(video, 0, 0, 1280, 720);
-          const base64Data = captureCanvas.toDataURL("image/jpeg", 0.78);
-          capturedSlides.push({
-            timestamp: timeTarget,
-            time_formatted: formatTimestamp(timeTarget),
-            data: base64Data
-          });
-        } else {
-          const diffResult = calculateDifference(thumbCanvas, lastCapturedCanvas);
-          if (diffResult.isSameSlide) {
-            // Instructor movement detected! Check if this frame is clearer (less obstructed)
-            if (diffResult.clarityA > diffResult.clarityB * 1.05) {
-              lastCapturedCtx.drawImage(thumbCanvas, 0, 0, 64, 36);
-              captureCtx.drawImage(video, 0, 0, 1280, 720);
-              capturedSlides[capturedSlides.length - 1] = {
-                timestamp: timeTarget,
-                time_formatted: formatTimestamp(timeTarget),
-                data: captureCanvas.toDataURL("image/jpeg", 0.78)
-              };
-            }
-          } else if (diffResult.isNewSlide || diffResult.isDistinct) {
-            lastCapturedCtx.drawImage(thumbCanvas, 0, 0, 64, 36);
-            captureCtx.drawImage(video, 0, 0, 1280, 720);
-            const base64Data = captureCanvas.toDataURL("image/jpeg", 0.78);
-            capturedSlides.push({
-              timestamp: timeTarget,
-              time_formatted: formatTimestamp(timeTarget),
-              data: base64Data
-            });
-          }
-        }
-      }
-
-      // Timeline Gap & End-of-Lecture Safety Net:
-      // Ensure no slides are skipped in long gaps (> 90s) or missed at the end of the video
-      const gaps = [];
-      const gapThreshold = Math.max(90, Math.floor(step * 2.5));
-      if (capturedSlides.length > 0 && duration > 60) {
-        for (let idx = 0; idx < capturedSlides.length - 1; idx++) {
-          const tA = capturedSlides[idx].timestamp;
-          const tB = capturedSlides[idx + 1].timestamp;
-          if (tB - tA > gapThreshold) {
-            gaps.push(Math.floor((tA + tB) / 2));
-          }
-        }
-        const lastTs = capturedSlides[capturedSlides.length - 1].timestamp;
-        if (lastTs < duration - 35) {
-          console.log(`[YT2PDF Companion] End-of-lecture gap detected (last slide: ${lastTs}s, duration: ${duration}s). Sampling closing slide...`);
-          gaps.push(Math.max(2, duration - 10));
-        }
-      }
-
-      if (gaps.length > 0 || (capturedSlides.length < 6 && duration > 60)) {
-        console.log(`[YT2PDF Companion] Filling ${gaps.length} timeline gaps across lecture...`);
-        const existingTs = new Set(capturedSlides.map(s => Math.floor(s.timestamp)));
-        const chkPoints = gaps.length > 0 ? gaps.slice(0, 60) : finalPoints.filter((_, idx) => idx % Math.max(1, Math.floor(finalPoints.length / 12)) === 0);
-        for (const tPoint of chkPoints) {
-          if (![...existingTs].some(ts => Math.abs(ts - tPoint) < 14)) {
-            try {
-              video.currentTime = tPoint;
-              await new Promise(r => setTimeout(r, 200));
-              captureCtx.drawImage(video, 0, 0, 1280, 720);
-              capturedSlides.push({
-                timestamp: tPoint,
-                time_formatted: formatTimestamp(tPoint),
-                data: captureCanvas.toDataURL("image/jpeg", 0.78)
-              });
-              existingTs.add(Math.floor(tPoint));
-            } catch (e) {}
-          }
-        }
-        capturedSlides.sort((a, b) => a.timestamp - b.timestamp);
-        console.log(`[YT2PDF Companion] Total slides after timeline gap coverage: ${capturedSlides.length}`);
-      }
-
-      if (capturedSlides.length === 0) {
-        captureCtx.drawImage(video, 0, 0, 1280, 720);
-        capturedSlides.push({
-          timestamp: originalTime,
-          time_formatted: "0:00",
-          data: captureCanvas.toDataURL("image/jpeg", 0.78)
-        });
-      }
-
-      console.log(`[YT2PDF Companion] Slide extraction complete: ${capturedSlides.length} distinct slides captured.`);
-
-      // Update button state: uploading
       buttonEl.innerHTML = `
         <svg class="yt2pdf-spinner" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
-        <span>Uploading...</span>
+        <span>0%</span>
       `;
-
-      let transcriptSegments = [];
-      try {
-        transcriptSegments = await extractTranscriptFromPage();
-      } catch (trErr) {
-        console.warn("[YT2PDF Companion] Manual transcript extraction error:", trErr);
-      }
-
-      let audioInfo = null;
-      try {
-        audioInfo = await extractAudioTrackFromPage();
-      } catch (aErr) {
-        console.warn("[YT2PDF Companion] Manual audio extraction notice:", aErr);
-      }
-
-      const payload = {
-        video_url: videoUrl,
-        title: videoTitle,
-        duration: duration,
-        frames: capturedSlides,
-        transcript: transcriptSegments,
-        audio_url: audioInfo ? audioInfo.audio_url : null,
-        audio_mime: audioInfo ? audioInfo.mime_type : "audio/mp4",
-        redirect_on_success: true
-      };
-
-      // Upload frames: Safe multi-strategy upload (background worker with direct HTTP fallback)
-      const uploadResult = await uploadFramesSafely(payload);
-
-      const jobId = uploadResult.job_id;
-      if (audioInfo && audioInfo.audio_url && jobId) {
-        uploadAudioInBackground(jobId, audioInfo.audio_url, uploadResult.backend_base);
-      }
-      // Always direct users to the official domain yt2pdfs.com
-      let webBase = "https://yt2pdfs.com";
-      if (uploadResult.backend_base && (uploadResult.backend_base.includes("localhost") || uploadResult.backend_base.includes("127.0.0.1"))) {
-        webBase = uploadResult.backend_base;
-      }
-      const destinationUrl = `${webBase}/?job_id=${jobId}`;
-
-      buttonEl.innerHTML = `
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2BA640" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-        <span>Opening...</span>
-      `;
-
-      showToast(`🎉 ${capturedSlides.length} slides captured! Opening YT2PDFS to download your PDF...`);
-
-      // Open YT2PDFS in a new tab via background service worker (immune to popup blocker suppression)
-      console.log("[YT2PDF Companion] Opening destination tab:", destinationUrl);
-      safeSendRuntimeMessage({
-        action: "open_website_tab",
-        url: destinationUrl
-      }, (res) => {
-        if (!res || !res.success) {
-          try {
-            const w = window.open(destinationUrl, "_blank");
-            if (!w) {
-              window.location.href = destinationUrl;
-            }
-          } catch(e) {
-            window.location.href = destinationUrl;
-          }
-        }
-      });
-
-      setTimeout(() => {
-        buttonEl.innerHTML = originalContent;
-        buttonEl.style.opacity = "1";
-        isExtracting = false;
-      }, 3500);
-
-    } catch (err) {
-      console.error("[YT2PDF Companion Error]:", err);
-      let errorMsg = err?.message || "Unknown error";
-      if (errorMsg.includes("Extension context invalidated")) {
-        errorMsg = "Extension was updated. Please refresh this tab (F5) to complete setup.";
-      }
-      showToast(`Extraction failed: ${errorMsg}`, true);
-      buttonEl.innerHTML = originalContent;
-      buttonEl.style.opacity = "1";
-      isExtracting = false;
-    } finally {
-      video.currentTime = originalTime;
-      video.muted = originalMuted;
-      video.volume = 1.0;
-      if (wasPaused) {
-        try { video.pause(); } catch(e) {}
-      } else {
-        try { video.play().catch(() => {}); } catch(e) {}
-      }
     }
+
+    showToast("🚀 Extracting slides silently in background. You can keep watching your video!");
+
+    // Delegate extraction entirely to silent background tab via service worker
+    safeSendRuntimeMessage({
+      action: "start_background_extraction",
+      video_url: window.location.href,
+      origin_url: "https://yt2pdfs.com",
+      redirect_on_success: true
+    }, (res) => {
+      if (res && res.error) {
+        isExtracting = false;
+        showToast("Background extraction error: " + res.error, true);
+        resetButton(buttonEl);
+      }
+    });
   }
 
   // ─────────────────────────────────────────────
@@ -1464,7 +1237,7 @@
   window.addEventListener("spfdone", injectButton);
   window.addEventListener("popstate", injectButton);
 
-  // Message listener for popup
+  // Message listener for popup, live background progress, and completion redirection
   if (isExtensionContextValid() && chrome?.runtime?.onMessage) {
     try {
       chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -1475,6 +1248,49 @@
             sendResponse({ started: true });
           } catch (e) {}
         }
+
+        // Live progress update from silent background extraction tab
+        if (request.action === "extraction_progress_update") {
+          const btn = document.getElementById("yt2pdf-action-btn");
+          if (btn && request.total) {
+            const pct = Math.min(99, Math.round((request.current / request.total) * 100));
+            btn.innerHTML = `
+              <svg class="yt2pdf-spinner" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
+              <span>${pct}%</span>
+            `;
+          }
+        }
+
+        // Extraction finished: redirect to YT2PDFS!
+        if (request.action === "extraction_finished") {
+          const btn = document.getElementById("yt2pdf-action-btn");
+          if (request.success) {
+            if (btn) {
+              btn.innerHTML = `
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2BA640" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <span>Opening...</span>
+              `;
+            }
+            showToast("🎉 Slides extracted! Opening YT2PDFS to download your PDF...");
+            if (request.data?.job_id) {
+              let webBase = request.data.backend_base || "https://yt2pdfs.com";
+              if (!webBase.includes("localhost") && !webBase.includes("127.0.0.1")) {
+                webBase = "https://yt2pdfs.com";
+              }
+              const destinationUrl = `${webBase}/?job_id=${request.data.job_id}`;
+              setTimeout(() => {
+                window.location.href = destinationUrl;
+              }, 400);
+            }
+          } else {
+            if (btn) {
+              btn.innerHTML = `<span>Failed</span>`;
+            }
+            showToast("Slide extraction failed: " + (request.error || "Unknown error"), true);
+            setTimeout(() => resetButton(btn), 3500);
+          }
+        }
+
         return true;
       });
     } catch (e) {}
