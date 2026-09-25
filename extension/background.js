@@ -147,6 +147,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.redirect_on_success) {
       target.searchParams.set("yt2pdf_redirect", "1");
     }
+    if (message.duration) {
+      target.searchParams.set("yt2pdf_duration", String(message.duration));
+    }
+    if (message.title) {
+      target.searchParams.set("yt2pdf_title", encodeURIComponent(message.title));
+    }
 
     console.log("[YT2PDF Background] Opening 100% silent background tab for:", target.toString());
 

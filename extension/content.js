@@ -553,7 +553,27 @@
       window.dispatchEvent(new Event("visibilitychange"));
     } catch (e) {}
 
-    // 1. Dedicated inline Web Worker with guaranteed timeout fallback
+    // 1. AudioContext keep-alive: prevents Chromium from throttling or sleeping background media decoders
+    let audioWakeup = null;
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (AudioCtx) {
+        audioWakeup = new AudioCtx();
+        const osc = audioWakeup.createOscillator();
+        const gain = audioWakeup.createGain();
+        gain.gain.value = 0.00001; // Completely inaudible
+        osc.connect(gain);
+        gain.connect(audioWakeup.destination);
+        osc.start();
+        if (audioWakeup.state === "suspended") {
+          audioWakeup.resume().catch(() => {});
+        }
+      }
+    } catch (e) {
+      console.warn("[YT2PDF Companion] AudioContext keep-alive notice:", e);
+    }
+
+    // 2. Dedicated inline Web Worker with guaranteed timeout fallback
     let unthrottledSleep = (ms) => new Promise(r => setTimeout(r, ms));
     try {
       let workerActive = false;
@@ -574,7 +594,6 @@
               resolve();
             }
           };
-          // Fail-safe setTimeout ensures resolution even if Worker is blocked by CSP
           setTimeout(finish, ms);
 
           if (workerActive) {
@@ -598,7 +617,7 @@
       console.warn("[YT2PDF Companion] Web Worker timer fallback:", e);
     }
 
-    // 2. Enforce 100% complete silence: permanently mute and zero-volume all audio/video elements
+    // 3. Enforce 100% complete silence: permanently mute and zero-volume all audio/video elements
     const silenceMediaElement = (el) => {
       try {
         el.muted = true;
@@ -616,28 +635,38 @@
     } catch (e) {}
 
     function dismissOverlaysAndSkipAds(videoEl) {
-      // Fast-forward ads
-      if (document.querySelector(".ad-showing, .ad-interrupting, .ytp-ad-player-overlay")) {
-        if (videoEl) {
-          try { videoEl.currentTime = (videoEl.duration || 9999); } catch(e) {}
+      try {
+        // 1. Fast-forward ad video
+        const adShowing = document.querySelector(".ad-showing, .ad-interrupting, .ytp-ad-player-overlay");
+        if (adShowing && videoEl) {
+          if (videoEl.duration && !isNaN(videoEl.duration) && isFinite(videoEl.duration)) {
+            videoEl.currentTime = videoEl.duration;
+          }
         }
-      }
-      const skipBtn = document.querySelector(".ytp-skip-ad-button, .ytp-ad-skip-button, .ytp-ad-skip-button-modern");
-      if (skipBtn) {
-        try { skipBtn.click(); } catch (e) {}
-      }
+        // 2. Click skip buttons
+        const skipBtns = document.querySelectorAll(
+          ".ytp-skip-ad-button, .ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-ad-skip-button-container button"
+        );
+        skipBtns.forEach(btn => { try { btn.click(); } catch(e) {} });
 
-      // Auto-click consent / confirm dialogs if present
-      const consentBtn = document.querySelector("ytd-button-renderer#confirm-button button, button[aria-label*='Accept all'], button[aria-label*='Agree']");
-      if (consentBtn) {
-        try { consentBtn.click(); } catch(e) {}
-      }
+        // 3. Close banner overlays
+        const bannerBtns = document.querySelectorAll(".ytp-ad-overlay-close-button, .ytp-ad-overlay-close-container");
+        bannerBtns.forEach(btn => { try { btn.click(); } catch(e) {} });
 
-      // Auto-click play button if needed
-      const playBtn = document.querySelector(".ytp-large-play-button, .ytp-play-button");
-      if (playBtn) {
-        try { playBtn.click(); } catch(e) {}
-      }
+        // 4. Confirm / "still watching" dialogs
+        const consentBtn = document.querySelector(
+          "ytd-button-renderer#confirm-button button, .yt-confirm-dialog-renderer #confirm-button button, button[aria-label*='Accept all'], button[aria-label*='Agree']"
+        );
+        if (consentBtn) {
+          try { consentBtn.click(); } catch(e) {}
+        }
+
+        // 5. Large play button if paused
+        const playBtn = document.querySelector(".ytp-large-play-button, .ytp-play-button");
+        if (playBtn && videoEl?.paused) {
+          try { playBtn.click(); } catch(e) {}
+        }
+      } catch (e) {}
     }
 
     let video = null;
@@ -798,14 +827,14 @@
         cleanUrl = cleanUrl.replace(/([&?])yt2pdf_headless=1&?/, "$1").replace(/[?&]$/, "");
       }
 
-      let step = 8;
-      if (duration > 43200) step = 120;     // > 12 hrs: sample every 2m (~360-450 points)
-      else if (duration > 21600) step = 75; // 6-12 hrs: sample every 75s (~280-450 points)
-      else if (duration > 10800) step = 45; // 3-6 hrs: sample every 45s (~240-480 points)
-      else if (duration > 3600) step = 20;  // 1-3 hrs: sample every 20s (~180-450 points)
-      else if (duration > 1800) step = 10; // 30-60 mins (every 10s: ~190 checks for 32m)
-      else if (duration > 600) step = 8;   // 10-30 mins
-      else step = 5;                       // < 10 mins
+      // Target 60-90 samples across the video (10-15s total extraction)
+      let targetSamples = 80;
+      if (duration < 300) targetSamples = Math.max(20, Math.floor(duration / 6));
+      else if (duration < 900) targetSamples = 60;
+      else if (duration < 3600) targetSamples = 80;
+      else targetSamples = 95;
+
+      let step = Math.max(5, Math.floor(duration / targetSamples));
 
       const samplePoints = [];
       const startT = Math.max(2, Math.floor(duration * 0.005));
@@ -816,7 +845,12 @@
       if (duration > 20 && (!samplePoints.length || samplePoints[samplePoints.length - 1] < duration - 15)) {
         samplePoints.push(Math.max(2, duration - 10));
       }
-      const finalPoints = samplePoints; // Full lecture coverage without decimation!
+
+      let finalPoints = samplePoints;
+      if (finalPoints.length > 95) {
+        const stride = finalPoints.length / 95;
+        finalPoints = Array.from({ length: 95 }, (_, idx) => finalPoints[Math.min(finalPoints.length - 1, Math.floor(idx * stride))]);
+      }
 
       const captureCanvas = document.createElement("canvas");
       captureCanvas.width = 1280;
@@ -837,6 +871,42 @@
 
       const capturedSlides = [];
 
+      // High-speed seek helper with clean listener cleanup and anti-ad/anti-freeze protection
+      async function seekToTime(targetTime) {
+        const activeVideo = document.querySelector("video.html5-main-video, video") || video;
+        if (!activeVideo) return;
+
+        dismissOverlaysAndSkipAds(activeVideo);
+
+        if (activeVideo.paused) {
+          try { activeVideo.play().catch(() => {}); } catch(e) {}
+        }
+
+        await new Promise((resolve) => {
+          let settled = false;
+          const finish = () => {
+            if (!settled) {
+              settled = true;
+              try { activeVideo.removeEventListener("seeked", onSeeked); } catch(e) {}
+              resolve();
+            }
+          };
+
+          const onSeeked = () => finish();
+          const timer = setTimeout(finish, 220);
+
+          try {
+            activeVideo.addEventListener("seeked", onSeeked, { once: true });
+            activeVideo.currentTime = targetTime;
+          } catch(e) {
+            clearTimeout(timer);
+            finish();
+          }
+        });
+
+        await unthrottledSleep(25);
+      }
+
       for (let i = 0; i < finalPoints.length; i++) {
         const timeTarget = finalPoints[i];
 
@@ -856,25 +926,16 @@
           } catch(e) {}
         }
 
-        // Seek to target timestamp with unthrottled worker race
-        await Promise.race([
-          new Promise((resolve) => {
-            const onSeeked = () => {
-              video.removeEventListener("seeked", onSeeked);
-              resolve();
-            };
-            video.addEventListener("seeked", onSeeked, { once: true });
-            video.currentTime = timeTarget;
-          }),
-          unthrottledSleep(500)
-        ]);
-        await unthrottledSleep(60);
+        await seekToTime(timeTarget);
 
-        thumbCtx.drawImage(video, 0, 0, 64, 36);
+        const currentVideo = document.querySelector("video.html5-main-video, video") || video;
+        if (!currentVideo) continue;
+
+        thumbCtx.drawImage(currentVideo, 0, 0, 64, 36);
 
         if (capturedSlides.length === 0) {
           lastCapturedCtx.drawImage(thumbCanvas, 0, 0, 64, 36);
-          captureCtx.drawImage(video, 0, 0, 1280, 720);
+          captureCtx.drawImage(currentVideo, 0, 0, 1280, 720);
           capturedSlides.push({
             timestamp: timeTarget,
             time_formatted: formatTimestamp(timeTarget),
@@ -886,7 +947,7 @@
             // Instructor movement detected! Check if this frame is clearer (less obstructed)
             if (diffResult.clarityA > diffResult.clarityB * 1.05) {
               lastCapturedCtx.drawImage(thumbCanvas, 0, 0, 64, 36);
-              captureCtx.drawImage(video, 0, 0, 1280, 720);
+              captureCtx.drawImage(currentVideo, 0, 0, 1280, 720);
               capturedSlides[capturedSlides.length - 1] = {
                 timestamp: timeTarget,
                 time_formatted: formatTimestamp(timeTarget),
@@ -895,7 +956,7 @@
             }
           } else if (diffResult.isNewSlide || diffResult.isDistinct) {
             lastCapturedCtx.drawImage(thumbCanvas, 0, 0, 64, 36);
-            captureCtx.drawImage(video, 0, 0, 1280, 720);
+            captureCtx.drawImage(currentVideo, 0, 0, 1280, 720);
             capturedSlides.push({
               timestamp: timeTarget,
               time_formatted: formatTimestamp(timeTarget),
@@ -927,19 +988,21 @@
       if (gaps.length > 0 || (capturedSlides.length < 6 && duration > 60)) {
         console.log(`[YT2PDF Companion] Filling ${gaps.length} timeline gaps across lecture...`);
         const existingTs = new Set(capturedSlides.map(s => Math.floor(s.timestamp)));
-        const chkPoints = gaps.length > 0 ? gaps.slice(0, 60) : finalPoints.filter((_, idx) => idx % Math.max(1, Math.floor(finalPoints.length / 12)) === 0);
+        const chkPoints = gaps.length > 0 ? gaps.slice(0, 10) : finalPoints.filter((_, idx) => idx % Math.max(1, Math.floor(finalPoints.length / 8)) === 0);
         for (const tPoint of chkPoints) {
           if (![...existingTs].some(ts => Math.abs(ts - tPoint) < 14)) {
             try {
-              video.currentTime = tPoint;
-              await unthrottledSleep(180);
-              captureCtx.drawImage(video, 0, 0, 1280, 720);
-              capturedSlides.push({
-                timestamp: tPoint,
-                time_formatted: formatTimestamp(tPoint),
-                data: captureCanvas.toDataURL("image/jpeg", 0.76)
-              });
-              existingTs.add(Math.floor(tPoint));
+              await seekToTime(tPoint);
+              const currentVideo = document.querySelector("video.html5-main-video, video") || video;
+              if (currentVideo) {
+                captureCtx.drawImage(currentVideo, 0, 0, 1280, 720);
+                capturedSlides.push({
+                  timestamp: tPoint,
+                  time_formatted: formatTimestamp(tPoint),
+                  data: captureCanvas.toDataURL("image/jpeg", 0.76)
+                });
+                existingTs.add(Math.floor(tPoint));
+              }
             } catch (e) {}
           }
         }
@@ -948,12 +1011,19 @@
       }
 
       if (capturedSlides.length === 0) {
-        captureCtx.drawImage(video, 0, 0, 1280, 720);
+        const currentVideo = document.querySelector("video.html5-main-video, video") || video;
+        if (currentVideo) {
+          captureCtx.drawImage(currentVideo, 0, 0, 1280, 720);
+        }
         capturedSlides.push({
           timestamp: 0,
           time_formatted: "0:00",
           data: captureCanvas.toDataURL("image/jpeg", 0.76)
         });
+      }
+
+      if (audioWakeup) {
+        try { audioWakeup.close(); } catch(e) {}
       }
 
       console.log(`[YT2PDF Companion] Silent background extraction complete (${capturedSlides.length} slides). Transmitting...`);
@@ -962,7 +1032,7 @@
       try {
         transcriptSegments = await Promise.race([
           extractTranscriptFromPage(),
-          unthrottledSleep(12000).then(() => [])
+          unthrottledSleep(6000).then(() => [])
         ]);
       } catch (trErr) {
         console.warn("[YT2PDF Companion] Transcript extraction error:", trErr);
@@ -1102,10 +1172,21 @@
 
     showToast("🚀 Extracting slides silently in background. You can keep watching your video!");
 
+    let currentDuration = 0;
+    if (video && video.duration && !isNaN(video.duration) && video.duration > 0) {
+      currentDuration = Math.floor(video.duration);
+    }
+    const titleEl = document.querySelector("h1.ytd-watch-metadata yt-formatted-string") ||
+                    document.querySelector("h1.title yt-formatted-string") ||
+                    document.querySelector("h1.title");
+    const videoTitle = titleEl ? (titleEl.innerText || "").trim() : document.title.replace(" - YouTube", "").trim();
+
     // Delegate extraction entirely to silent background tab via service worker
     safeSendRuntimeMessage({
       action: "start_background_extraction",
       video_url: window.location.href,
+      duration: currentDuration,
+      title: videoTitle,
       origin_url: "https://yt2pdfs.com",
       redirect_on_success: true
     }, (res) => {
