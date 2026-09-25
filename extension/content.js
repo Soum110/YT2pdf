@@ -455,12 +455,19 @@
   }
 
   async function directUploadFrames(payload) {
-    const candidateBases = [
+    const candidateBases = [];
+    if (window.location.origin && (window.location.origin.includes("localhost") || window.location.origin.includes("127.0.0.1") || window.location.origin.includes("yt2pdfs.com"))) {
+      candidateBases.push(window.location.origin);
+    }
+    const defaultBases = [
       "https://yt2pdfs.com",
       "https://yt2pdf-214301889618.europe-west1.run.app",
       "http://localhost:8080",
       "http://localhost:8000"
     ];
+    for (const b of defaultBases) {
+      if (!candidateBases.includes(b)) candidateBases.push(b);
+    }
 
     let lastError = null;
     for (const base of candidateBases) {
@@ -493,6 +500,13 @@
   }
 
   async function uploadFramesSafely(payload) {
+    const frameCount = payload.frames?.length || 0;
+    // For large payloads (> 10 frames), bypass Chrome MV3 message port limits and upload directly
+    if (frameCount > 10) {
+      console.log(`[YT2PDF Companion] Uploading ${frameCount} slides directly to server...`);
+      return await directUploadFrames(payload);
+    }
+
     // 1. Try background service worker if extension context is alive
     if (isExtensionContextValid()) {
       try {
@@ -519,11 +533,9 @@
       } catch (bgErr) {
         console.warn("[YT2PDF Companion] Background worker error, falling back to direct upload:", bgErr.message);
       }
-    } else {
-      console.log("[YT2PDF Companion] Extension context disconnected/reloaded; proceeding with direct web upload.");
     }
 
-    // 2. Fallback: Direct web upload (completely immune to extension context invalidation)
+    // 2. Direct web upload fallback
     return await directUploadFrames(payload);
   }
 
@@ -1058,31 +1070,56 @@
       const isRedirectRequested = new URLSearchParams(window.location.search).get("yt2pdf_redirect") === "1";
       payload.redirect_on_success = isRedirectRequested;
 
+      // Broadcast progress that frame scanning is done and upload is beginning
       safeSendRuntimeMessage({
-        action: "upload_frames",
-        payload: payload,
-        headless: true,
-        redirect_on_success: isRedirectRequested
-      }, (res) => {
-        if (res && res.success && res.data) {
-          const resJobId = res.data.job_id;
-          const resBase = res.data.backend_base;
-          if (audioInfo && audioInfo.audio_url && resJobId) {
-            uploadAudioInBackground(resJobId, audioInfo.audio_url, resBase);
-          }
-          notifyParentComplete(resJobId, resBase);
-        } else {
-          console.warn("[YT2PDF Companion] Background worker upload failed or timed out, trying direct upload fallback...");
-          directUploadFrames(payload).then((directRes) => {
-            if (audioInfo && audioInfo.audio_url && directRes.job_id) {
-              uploadAudioInBackground(directRes.job_id, audioInfo.audio_url, directRes.backend_base);
-            }
-            notifyParentComplete(directRes.job_id, directRes.backend_base);
-          }).catch((dErr) => {
-            notifyParentError(dErr.message);
-          });
-        }
+        action: "headless_progress",
+        current: finalPoints.length,
+        total: finalPoints.length,
+        stage: "uploading"
       });
+
+      const handleUploadSuccess = (jobId, base) => {
+        if (audioInfo && audioInfo.audio_url && jobId) {
+          uploadAudioInBackground(jobId, audioInfo.audio_url, base);
+        }
+
+        // 1. Notify background worker immediately so it closes the window and redirects origin tab!
+        safeSendRuntimeMessage({
+          action: "headless_extraction_direct_success",
+          data: {
+            job_id: jobId,
+            backend_base: base,
+            slide_count: capturedSlides.length
+          }
+        });
+
+        // 2. Notify parent iframe if embedded
+        notifyParentComplete(jobId, base);
+      };
+
+      const handleUploadFailure = (errMsg) => {
+        console.error("[YT2PDF Companion] Upload failed:", errMsg);
+        safeSendRuntimeMessage({
+          action: "headless_extraction_failed",
+          error: errMsg
+        });
+        notifyParentError(errMsg);
+      };
+
+      // Upload frames safely using high-speed direct upload
+      uploadFramesSafely(payload)
+        .then((resData) => {
+          if (resData && (resData.job_id || resData.data?.job_id)) {
+            const finalJobId = resData.job_id || resData.data?.job_id;
+            const finalBase = resData.backend_base || resData.data?.backend_base || "https://yt2pdfs.com";
+            handleUploadSuccess(finalJobId, finalBase);
+          } else {
+            handleUploadFailure("Invalid response from server after uploading slides.");
+          }
+        })
+        .catch((uErr) => {
+          handleUploadFailure(uErr.message || "Failed to upload extracted slides.");
+        });
 
     } catch (err) {
       console.error("[YT2PDF Companion] Silent extraction error:", err);
@@ -1178,13 +1215,13 @@
       return;
     }
 
-    // Trigger 100% silent background tab extraction via service worker
+    // Trigger 100% silent background window extraction via service worker
     safeSendRuntimeMessage({
       action: "start_background_extraction",
       video_url: window.location.href,
       duration: currentDuration,
       title: videoTitle,
-      redirect_on_success: false
+      redirect_on_success: true
     }, (response) => {
       if (chrome.runtime.lastError || (response && !response.success)) {
         isExtracting = false;
@@ -1327,14 +1364,15 @@
           } catch (e) {}
         }
 
-        // Live progress update from silent background extraction tab
+        // Live progress update from silent background extraction
         if (request.action === "extraction_progress_update") {
           const btn = document.getElementById("yt2pdf-action-btn");
           if (btn && request.total) {
             const pct = Math.min(99, Math.round((request.current / request.total) * 100));
+            const label = (request.stage === "uploading" || pct >= 99) ? "Uploading..." : `${pct}%`;
             btn.innerHTML = `
               <svg class="yt2pdf-spinner" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
-              <span>${pct}%</span>
+              <span>${label}</span>
             `;
           }
         }
@@ -1346,7 +1384,7 @@
             if (btn) {
               btn.innerHTML = `
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2BA640" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                <span>Opening...</span>
+                <span>100% Done</span>
               `;
             }
             showToast("🎉 Slides extracted! Opening YT2PDFS to download your PDF...");
