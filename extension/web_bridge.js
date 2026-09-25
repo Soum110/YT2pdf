@@ -57,6 +57,7 @@
   let lastExtractionTime = 0;
   let activeExtractorIframe = null;
   let extractorWatchdog = null;
+  let activeVideoId = "";
 
   function cleanupExtraction() {
     if (extractorWatchdog) {
@@ -130,19 +131,15 @@
       });
     }, 600000);
 
+    activeVideoId = videoId;
     try {
-      chrome.runtime.sendMessage({
-        action: "start_background_extraction",
-        video_url: videoUrl,
-        origin_url: window.location.origin
-      }, (response) => {
-        if (chrome.runtime.lastError || (response && !response.success)) {
-          dispatchResult({
-            success: false,
-            error: chrome.runtime.lastError?.message || response?.error || "Failed to start background extraction."
-          });
-        }
-      });
+      const frame = document.createElement("iframe");
+      frame.id = "yt2pdf-silent-extractor";
+      frame.src = `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&enablejsapi=1&yt2pdf_headless=1`;
+      frame.style.cssText = "position:fixed;top:-10000px;left:-10000px;width:640px;height:480px;border:none;pointer-events:none;opacity:0;z-index:-9999;";
+      frame.allow = "autoplay; encrypted-media";
+      activeExtractorIframe = frame;
+      document.body.appendChild(frame);
     } catch (e) {
       dispatchResult({ success: false, error: "Extraction error: " + e.message });
     }
@@ -214,9 +211,15 @@
         slide_count: event.data.slide_count
       });
     } else if (event.data?.type === "YT2PDF_HEADLESS_ERROR") {
+      const errMsg = event.data.error || "";
+      if (activeExtractorIframe && activeExtractorIframe.src && activeExtractorIframe.src.includes("/embed/") && activeVideoId) {
+        console.warn("[YT2PDF Bridge] Embed player failed, falling back to watch page in silent frame:", errMsg);
+        activeExtractorIframe.src = `https://www.youtube.com/watch?v=${activeVideoId}&autoplay=1&mute=1&yt2pdf_headless=1`;
+        return;
+      }
       dispatchResult({
         success: false,
-        error: event.data.error || "Background slide extraction failed."
+        error: errMsg || "Background slide extraction failed."
       });
     } else if (event.data?.type === "YT2PDF_PING") {
       signalActive();

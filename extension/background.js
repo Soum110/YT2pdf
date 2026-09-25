@@ -138,9 +138,7 @@ function cleanupExtraction(identifier, error = null, resultData = null) {
     }
     const destUrl = `${webBase}/?job_id=${resultData.job_id}`;
     console.log("[YT2PDF Background] Direct foreground redirection for origin tab to:", destUrl);
-    chrome.tabs.update(item.originTabId, { url: destUrl }).catch(() => {
-      chrome.tabs.create({ url: destUrl, active: true }).catch(() => {});
-    });
+    chrome.tabs.update(item.originTabId, { url: destUrl }).catch(() => {});
   }
 
   if (item.originTabId) {
@@ -175,112 +173,13 @@ chrome.tabs.onRemoved.addListener((closedTabId) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  // 1. Silent Background Extraction (Invisible Minimized Window)
+  // 1. Silent Background Extraction
   if (message.action === "start_background_extraction") {
-    const originTabId = sender.tab?.id;
-    const originUrl = message.origin_url || null;
-
-    let rawUrl = message.video_url;
-    try {
-      const u = new URL(rawUrl);
-      let videoId = "";
-      if (u.hostname.includes("youtu.be")) {
-        videoId = u.pathname.replace(/^\//, "").split("?")[0];
-      } else if (u.pathname.includes("/shorts/")) {
-        videoId = u.pathname.split("/shorts/")[1]?.split("/")[0];
-      } else if (u.searchParams.has("v")) {
-        videoId = u.searchParams.get("v");
-      }
-      if (videoId) {
-        rawUrl = `https://www.youtube.com/watch?v=${videoId}`;
-      }
-    } catch (e) {}
-
-    const target = new URL(rawUrl);
-    target.searchParams.set("autoplay", "1");
-    target.searchParams.set("mute", "1");
-    target.searchParams.set("yt2pdf_headless", "1");
-    if (message.redirect_on_success) {
-      target.searchParams.set("yt2pdf_redirect", "1");
-    }
-    if (message.duration) {
-      target.searchParams.set("yt2pdf_duration", String(message.duration));
-    }
-    if (message.title) {
-      target.searchParams.set("yt2pdf_title", message.title);
-    }
-
-    console.log("[YT2PDF Background] Opening 100% silent background window for:", target.toString());
-
-    const registerItem = (tabId, windowId) => {
-      if (tabId) {
-        chrome.tabs.update(tabId, { muted: true }).catch(() => {});
-      }
-
-      const timeout = setTimeout(() => {
-        console.warn(`[YT2PDF Background] Extraction timed out for tab ${tabId} / win ${windowId}.`);
-        cleanupExtraction(tabId || windowId, "Slide extraction timed out. Please ensure the video is publicly accessible and try again.");
-      }, 600000);
-
-      const item = {
-        tabId,
-        windowId,
-        sendResponse,
-        timeout,
-        originTabId,
-        originUrl,
-        redirectOnSuccess: Boolean(message.redirect_on_success)
-      };
-
-      if (tabId) activeExtractions.set(tabId, item);
-      if (windowId) activeExtractions.set(`win_${windowId}`, item);
-    };
-
-    // Open a minimized, non-intrusive popup window.
-    // This ensures ZERO tabs appear in the user's current window or tab bar!
-    const winOptions = {
-      url: target.toString(),
-      focused: false,
-      state: "minimized",
-      type: "popup",
-      width: 400,
-      height: 300,
-      left: 20000,
-      top: 20000
-    };
-
-    chrome.windows.create(winOptions, (newWin) => {
-      if (chrome.runtime.lastError || !newWin) {
-        console.warn("[YT2PDF Background] windows.create failed, falling back to background tab:", chrome.runtime.lastError?.message);
-        chrome.tabs.create({
-          url: target.toString(),
-          active: false
-        }, (newTab) => {
-          if (chrome.runtime.lastError || !newTab) {
-            sendResponse({
-              success: false,
-              error: chrome.runtime.lastError?.message || "Failed to create extraction tab."
-            });
-            return;
-          }
-          registerItem(newTab.id, null);
-        });
-        return;
-      }
-
-      const windowId = newWin.id;
-      const tabId = (newWin.tabs && newWin.tabs.length > 0) ? newWin.tabs[0].id : null;
-      if (tabId) {
-        registerItem(tabId, windowId);
-      } else {
-        chrome.tabs.query({ windowId: windowId }, (tabs) => {
-          const tId = (tabs && tabs.length > 0) ? tabs[0].id : null;
-          registerItem(tId, windowId);
-        });
-      }
-    });
-
-    return true; // Keep channel open for async response
+    // Extraction now runs 100% in-page via silent invisible iframe.
+    // Zero browser tabs and zero OS windows are ever created!
+    console.log("[YT2PDF Background] In-page silent iframe extraction active.");
+    sendResponse({ success: true, mode: "in_page_frame" });
+    return false;
   }
 
   // 2. Real-time progress update forwarding & watchdog keepalive
@@ -373,11 +272,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               const destUrl = `${webBase}/?job_id=${data.job_id}`;
               console.log("[YT2PDF Background] Direct foreground redirection for:", destUrl);
               if (pending && pending.originTabId) {
-                chrome.tabs.update(pending.originTabId, { url: destUrl }).catch(() => {
-                  chrome.tabs.create({ url: destUrl, active: true }).catch(() => {});
-                });
-              } else {
-                chrome.tabs.create({ url: destUrl, active: true }).catch(() => {});
+                chrome.tabs.update(pending.originTabId, { url: destUrl }).catch(() => {});
               }
             }
 
