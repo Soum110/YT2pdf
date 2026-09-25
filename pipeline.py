@@ -851,10 +851,10 @@ def run_pipeline_from_frames(
         # Cleanup raw frames
         shutil.rmtree(raw_frames_dir, ignore_errors=True)
 
-        # Write completion status & initial outputs (Slides PDF ready immediately!)
+        # Update status: slides compiled, now synthesizing AI study guide
         _write_status(
-            job_dir, "completed", 100,
-            f"Done! {len(verified)} slides extracted.",
+            job_dir, "generating_guide", 90,
+            f"Slides compiled ({len(verified)} slides). Synthesizing AI Study Guide...",
             slide_count=len(verified),
         )
         (job_dir / "outputs.json").write_text(json.dumps({
@@ -962,12 +962,16 @@ def run_pipeline_from_frames(
             except Exception as det_err:
                 log.warning("[%s] Companion fallback study guide failed: %s", job_id, det_err)
 
-        if guide_ready:
-            (job_dir / "outputs.json").write_text(json.dumps({
-                "slides_pdf": True,
-                "study_guide_pdf": True,
-                "slide_count": len(verified),
-            }))
+        (job_dir / "outputs.json").write_text(json.dumps({
+            "slides_pdf": True,
+            "study_guide_pdf": guide_ready,
+            "slide_count": len(verified),
+        }))
+        _write_status(
+            job_dir, "completed", 100,
+            f"Done! {len(verified)} slides & AI study guide ready.",
+            slide_count=len(verified),
+        )
 
         # Cache completed job in 5TB storage
         try:
@@ -1126,7 +1130,11 @@ def run_pipeline_from_video_file(
         )
         log.info("[%s] Slides PDF ready: %s", job_id, slides_pdf_path)
 
-        _write_status(job_dir, "completed", 100, f"Done! {len(verified)} slides extracted.", slide_count=len(verified))
+        _write_status(
+            job_dir, "generating_guide", 90,
+            f"Slides compiled ({len(verified)} slides). Synthesizing AI Study Guide from video audio...",
+            slide_count=len(verified),
+        )
         (job_dir / "outputs.json").write_text(json.dumps({
             "slides_pdf": True,
             "study_guide_pdf": False,
@@ -1182,12 +1190,16 @@ def run_pipeline_from_video_file(
             except Exception as det_err:
                 log.warning("[%s] Deterministic study guide error: %s", job_id, det_err)
 
-        if guide_ready:
-            (job_dir / "outputs.json").write_text(json.dumps({
-                "slides_pdf": True,
-                "study_guide_pdf": True,
-                "slide_count": len(verified),
-            }))
+        (job_dir / "outputs.json").write_text(json.dumps({
+            "slides_pdf": True,
+            "study_guide_pdf": guide_ready,
+            "slide_count": len(verified),
+        }))
+        _write_status(
+            job_dir, "completed", 100,
+            f"Done! {len(verified)} slides & AI study guide ready.",
+            slide_count=len(verified),
+        )
 
     except Exception as e:
         log.exception("[%s] Video upload pipeline failed: %s", job_id, e)
