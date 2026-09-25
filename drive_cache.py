@@ -46,9 +46,13 @@ class DriveCacheManager:
     """Manages local and Google Drive / Cloud Storage caching."""
 
     def __init__(self):
-        self.folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID", "").strip()
+        self.folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID", "").strip() or "1RYCL9B8OkOJ0m8VL7f7Rhk3q4gMSjBor"
+        self.token_file = os.environ.get("GOOGLE_DRIVE_TOKEN_FILE", "").strip() or "token.json"
+        self.token_json = os.environ.get("GOOGLE_DRIVE_OAUTH_TOKEN", "").strip()
         self.service_account_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
         self.service_account_file = os.environ.get("GOOGLE_SERVICE_ACCOUNT_FILE", "").strip()
+        if not self.service_account_file and Path("service_account.json").exists():
+            self.service_account_file = str(Path("service_account.json").resolve())
         self._drive_service = None
         self._init_drive_client()
 
@@ -59,28 +63,55 @@ class DriveCacheManager:
             return
 
         try:
+            from google.oauth2.credentials import Credentials
             from google.oauth2 import service_account
+            from google.auth.transport.requests import Request
             import google.auth
             from googleapiclient.discovery import build
 
-            scopes = ['https://www.googleapis.com/auth/drive.file', 'https://www.googleapis.com/auth/drive']
+            scopes = ['https://www.googleapis.com/auth/drive']
 
             creds = None
-            if self.service_account_json:
+
+            # 1. Prioritize OAuth 2.0 User Token (consumes personal 5TB Google One quota)
+            if self.token_json:
                 try:
-                    info = json.loads(self.service_account_json)
-                    creds = service_account.Credentials.from_service_account_info(info, scopes=scopes)
+                    info = json.loads(self.token_json)
+                    creds = Credentials.from_authorized_user_info(info, scopes=scopes)
                 except Exception as e:
-                    log.error("Failed to parse GOOGLE_SERVICE_ACCOUNT_JSON: %s", e)
-            elif self.service_account_file and os.path.exists(self.service_account_file):
-                creds = service_account.Credentials.from_service_account_file(self.service_account_file, scopes=scopes)
-            else:
-                # Automatic Default Credentials (native Google Cloud Run service account)
+                    log.error("Failed to parse GOOGLE_DRIVE_OAUTH_TOKEN: %s", e)
+            elif Path(self.token_file).exists():
                 try:
-                    creds, _ = google.auth.default(scopes=scopes)
-                    log.info("Using Google Cloud Application Default Credentials (native Cloud Run identity).")
-                except Exception as adc_err:
-                    log.debug("ADC not available: %s", adc_err)
+                    creds = Credentials.from_authorized_user_file(self.token_file, scopes=scopes)
+                except Exception as e:
+                    log.error("Failed to load token file %s: %s", self.token_file, e)
+
+            # Automatically refresh user token if expired
+            if creds and creds.expired and creds.refresh_token:
+                try:
+                    creds.refresh(Request())
+                    if Path(self.token_file).exists():
+                        Path(self.token_file).write_text(creds.to_json())
+                    log.info("Google Drive OAuth token refreshed successfully.")
+                except Exception as e:
+                    log.warning("Failed to refresh OAuth token: %s", e)
+
+            # 2. Fall back to Service Account / ADC if user token is not present
+            if not creds:
+                if self.service_account_json:
+                    try:
+                        info = json.loads(self.service_account_json)
+                        creds = service_account.Credentials.from_service_account_info(info, scopes=scopes)
+                    except Exception as e:
+                        log.error("Failed to parse GOOGLE_SERVICE_ACCOUNT_JSON: %s", e)
+                elif self.service_account_file and os.path.exists(self.service_account_file):
+                    creds = service_account.Credentials.from_service_account_file(self.service_account_file, scopes=scopes)
+                else:
+                    try:
+                        creds, _ = google.auth.default(scopes=scopes)
+                        log.info("Using Google Cloud Application Default Credentials (native Cloud Run identity).")
+                    except Exception as adc_err:
+                        log.debug("ADC not available: %s", adc_err)
 
             if not creds:
                 log.info("Google Drive credentials not found. Running in local-disk cache mode.")

@@ -32,6 +32,10 @@ jobs/*
 .env
 .env.local
 .env.*.local
+*service_account*.json
+*client_secret*.json
+token.json
+*.json.key
 
 # Cloudflare & Node
 .wrangler/
