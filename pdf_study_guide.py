@@ -64,32 +64,7 @@ def _build_html(study_guide, video_title: str) -> str:
         c_subtitle = html.escape(ch.subtitle)
         intro_p = f'<div class="chapter-intro"><p>{html.escape(ch.introduction)}</p></div>' if ch.introduction else ''
 
-        # 1. Figures associated with this chapter (Curated & deduplicated!)
-        figures_html = ""
-        for f_idx, fig in enumerate(ch.associated_figures, 1):
-            if fig.image_path and os.path.exists(fig.image_path):
-                img_path = Path(fig.image_path).resolve()
-                fig_title = html.escape(fig.title) if fig.title else ""
-                title_html = f'<div class="figure-title"><strong>{fig_title}</strong></div>' if fig_title else ''
-                cap = html.escape(fig.caption)
-                exp = html.escape(fig.explanation)
-                exp_p = f'<p class="figure-explanation">{exp}</p>' if exp else ''
-                badge = '<div class="sim-badge">🔬 Pedagogical Schematic</div>' if fig.fig_type == "simulation" else '<div class="diag-badge">📐 Cropped Technical Diagram</div>'
-                card_class = "simulation-card" if fig.fig_type == "simulation" else "figure-card"
-
-                figures_html += f'''
-                <div class="figure-card {card_class}">
-                  {badge}
-                  {title_html}
-                  <div class="figure-img-wrap">
-                    <img src="{img_path.as_uri()}" alt="{cap}" class="figure-img" />
-                  </div>
-                  <p class="figure-caption"><strong>Figure {c_num}.{f_idx}:</strong> {cap}</p>
-                  {exp_p}
-                </div>
-                '''
-
-        # 2. Content Paragraphs (Chronological basic -> advanced)
+        # 1. Content Paragraphs (Chronological basic -> advanced)
         body_p_html = "".join(f'<p class="explanation-p">{p}</p>' for p in ch.content_paragraphs if p.strip())
 
         # 3. Core Terminology & Definitions
@@ -176,9 +151,6 @@ def _build_html(study_guide, video_title: str) -> str:
           </header>
 
           {intro_p}
-
-          {figures_html}
-
           <div class="chapter-body">
             {body_p_html}
           </div>
@@ -925,25 +897,6 @@ def build_study_guide_pdf(
                 pdf.set_text_color(51, 65, 85)
                 safe_multi(intro, h=5)
                 pdf.ln(2)
-
-            # Figures (Compact reference exhibits)
-            for fig in (getattr(ch, "associated_figures", []) or []):
-                img_path = getattr(fig, "image_path", None) if not isinstance(fig, dict) else fig.get("image_path")
-                if img_path and os.path.exists(img_path):
-                    try:
-                        pdf.ln(2)
-                        fig_w = min(85, pdf.epw)
-                        fig_x = pdf.l_margin + (pdf.epw - fig_w) / 2
-                        pdf.image(img_path, x=fig_x, w=fig_w)
-                        pdf.ln(1)
-                        caption = getattr(fig, "caption", "") if not isinstance(fig, dict) else fig.get("caption", "")
-                        if caption:
-                            pdf.set_font(font_family, "I", 8)
-                            pdf.set_text_color(100, 116, 139)
-                            safe_multi(f"Figure: {caption}", h=4)
-                            pdf.ln(1)
-                    except Exception as img_err:
-                        log.debug("Fallback PDF image render skipped: %s", img_err)
 
             # Content Paragraphs
             pdf.set_font(font_family, "", 9)

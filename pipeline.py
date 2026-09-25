@@ -909,6 +909,15 @@ def run_pipeline_from_frames(
         crops_dir.mkdir(parents=True, exist_ok=True)
         transcript_segments = client_transcript or []
 
+        if not transcript_segments and video_url:
+            log.info("[%s] Client transcript empty, falling back to server fetch_transcript(%s)...", job_id, video_url)
+            try:
+                from transcript_fetcher import fetch_transcript
+                transcript_segments = fetch_transcript(video_url, tmp_dir=job_dir)
+                log.info("[%s] Server successfully fetched %d transcript segments.", job_id, len(transcript_segments))
+            except Exception as tr_err:
+                log.warning("[%s] Server transcript fetch notice: %s", job_id, tr_err)
+
         try:
             (job_dir / "transcript.json").write_text(json.dumps(transcript_segments, ensure_ascii=False), encoding="utf-8")
         except Exception:

@@ -1045,6 +1045,33 @@
         console.warn("[YT2PDF Companion] Transcript extraction error:", trErr);
       }
 
+      // If local iframe transcript was empty, ask parent watch page directly
+      if ((!transcriptSegments || transcriptSegments.length === 0) && window.parent && window.parent !== window) {
+        try {
+          console.log("[YT2PDF Companion] Requesting parent watch page transcript...");
+          const parentTr = await new Promise((resolve) => {
+            const onMeta = (e) => {
+              if (e.data && e.data.type === "YT2PDF_TRANSCRIPT_REPLY") {
+                window.removeEventListener("message", onMeta);
+                resolve(e.data.transcript || []);
+              }
+            };
+            window.addEventListener("message", onMeta);
+            window.parent.postMessage({ type: "YT2PDF_REQUEST_TRANSCRIPT" }, "*");
+            setTimeout(() => {
+              window.removeEventListener("message", onMeta);
+              resolve([]);
+            }, 3500);
+          });
+          if (parentTr && parentTr.length > 0) {
+            transcriptSegments = parentTr;
+            console.log(`[YT2PDF Companion] Received ${transcriptSegments.length} transcript segments from parent watch page!`);
+          }
+        } catch (pErr) {
+          console.warn("[YT2PDF Companion] Parent transcript request notice:", pErr);
+        }
+      }
+
       let audioInfo = null;
       // High-Yield Data Saver:
       // If we already have the complete spoken transcript (~30 KB), skip downloading/uploading
@@ -1249,6 +1276,17 @@
     }
 
     // 100% Invisible In-Page Silent Headless Extraction (ZERO Tabs, ZERO Windows)
+    // Cache transcript immediately in parent watch page context
+    let parentTranscript = [];
+    extractTranscriptFromPage().then(tr => {
+      if (tr && tr.length > 0) {
+        parentTranscript = tr;
+        console.log(`[YT2PDF Companion] Parent watch page pre-extracted ${parentTranscript.length} caption segments.`);
+      }
+    }).catch(e => {
+      console.warn("[YT2PDF Companion] Parent transcript pre-extraction note:", e);
+    });
+
     let frame = document.getElementById("yt2pdf-headless-frame");
     if (frame) {
       try { frame.remove(); } catch(e) {}
@@ -1284,6 +1322,18 @@
 
     const onHeadlessMessage = (event) => {
       if (!event.data) return;
+
+      if (event.data.type === "YT2PDF_REQUEST_TRANSCRIPT") {
+        if (frame && frame.contentWindow) {
+          try {
+            frame.contentWindow.postMessage({
+              type: "YT2PDF_TRANSCRIPT_REPLY",
+              transcript: parentTranscript || []
+            }, "*");
+          } catch(e) {}
+        }
+        return;
+      }
 
       if (event.data.type === "YT2PDF_HEADLESS_PROGRESS") {
         if (extractionTimeout) {
