@@ -1033,10 +1033,6 @@
         });
       }
 
-      if (audioWakeup) {
-        try { audioWakeup.close(); } catch(e) {}
-      }
-
       console.log(`[YT2PDF Companion] Silent background extraction complete (${capturedSlides.length} slides). Transmitting...`);
 
       let transcriptSegments = [];
