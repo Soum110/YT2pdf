@@ -54,26 +54,36 @@ class DriveCacheManager:
 
     def _init_drive_client(self):
         """Initialize Google Drive API client if credentials are provided."""
-        if not (self.service_account_json or self.service_account_file):
-            log.info("Google Drive credentials not set. Running in local-disk cache mode.")
+        if not self.folder_id:
+            log.info("GOOGLE_DRIVE_FOLDER_ID not set. Running in local-disk cache mode.")
             return
 
         try:
             from google.oauth2 import service_account
+            import google.auth
             from googleapiclient.discovery import build
 
             scopes = ['https://www.googleapis.com/auth/drive.file', 'https://www.googleapis.com/auth/drive']
 
+            creds = None
             if self.service_account_json:
                 try:
                     info = json.loads(self.service_account_json)
                     creds = service_account.Credentials.from_service_account_info(info, scopes=scopes)
                 except Exception as e:
                     log.error("Failed to parse GOOGLE_SERVICE_ACCOUNT_JSON: %s", e)
-                    return
             elif self.service_account_file and os.path.exists(self.service_account_file):
                 creds = service_account.Credentials.from_service_account_file(self.service_account_file, scopes=scopes)
             else:
+                # Automatic Default Credentials (native Google Cloud Run service account)
+                try:
+                    creds, _ = google.auth.default(scopes=scopes)
+                    log.info("Using Google Cloud Application Default Credentials (native Cloud Run identity).")
+                except Exception as adc_err:
+                    log.debug("ADC not available: %s", adc_err)
+
+            if not creds:
+                log.info("Google Drive credentials not found. Running in local-disk cache mode.")
                 return
 
             self._drive_service = build('drive', 'v3', credentials=creds, cache_discovery=False)
