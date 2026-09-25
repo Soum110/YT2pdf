@@ -1178,89 +1178,21 @@
       return;
     }
 
-    // Silent in-page embed extractor (zero tab clutter, 100% active-tab foreground performance)
-    const oldIframe = document.getElementById("yt2pdf-silent-extractor");
-    if (oldIframe) {
-      try { oldIframe.remove(); } catch(e) {}
-    }
-
-    const embedUrl = new URL(`https://www.youtube.com/embed/${videoId}`);
-    embedUrl.searchParams.set("autoplay", "1");
-    embedUrl.searchParams.set("mute", "1");
-    embedUrl.searchParams.set("enablejsapi", "1");
-    embedUrl.searchParams.set("yt2pdf_headless", "1");
-    if (currentDuration > 0) {
-      embedUrl.searchParams.set("yt2pdf_duration", String(currentDuration));
-    }
-    if (videoTitle) {
-      embedUrl.searchParams.set("yt2pdf_title", videoTitle);
-    }
-
-    const iframe = document.createElement("iframe");
-    iframe.id = "yt2pdf-silent-extractor";
-    iframe.src = embedUrl.toString();
-    iframe.allow = "autoplay";
-    iframe.style.cssText = "position:fixed;top:-9999px;left:-9999px;width:1280px;height:720px;opacity:0.001;pointer-events:none;border:none;z-index:-99999;";
-
-    let watchdog = setTimeout(() => {
-      if (isExtracting) {
-        showToast("Slide extraction timed out. Please try again.", true);
-        try { iframe.remove(); } catch(e) {}
+    // Trigger 100% silent background tab extraction via service worker
+    safeSendRuntimeMessage({
+      action: "start_background_extraction",
+      video_url: window.location.href,
+      duration: currentDuration,
+      title: videoTitle,
+      redirect_on_success: false
+    }, (response) => {
+      if (chrome.runtime.lastError || (response && !response.success)) {
+        isExtracting = false;
+        const err = chrome.runtime.lastError?.message || response?.error || "Failed to start background extraction.";
+        showToast("Slide extraction error: " + err, true);
         resetButton(buttonEl);
       }
-    }, 90000);
-
-    const onMessage = (event) => {
-      if (event.data?.type === "YT2PDF_HEADLESS_PROGRESS") {
-        if (watchdog) {
-          clearTimeout(watchdog);
-          watchdog = setTimeout(() => {
-            if (isExtracting) {
-              showToast("Slide extraction timed out.", true);
-              try { iframe.remove(); } catch(e) {}
-              resetButton(buttonEl);
-            }
-          }, 60000);
-        }
-        if (buttonEl && event.data.total) {
-          const pct = Math.min(99, Math.round((event.data.current / event.data.total) * 100));
-          buttonEl.innerHTML = `
-            <svg class="yt2pdf-spinner" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
-            <span>${pct}%</span>
-          `;
-        }
-      } else if (event.data?.type === "YT2PDF_HEADLESS_COMPLETE") {
-        clearTimeout(watchdog);
-        window.removeEventListener("message", onMessage);
-        try { iframe.remove(); } catch(e) {}
-        if (buttonEl) {
-          buttonEl.innerHTML = `
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2BA640" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-            <span>Opening...</span>
-          `;
-        }
-        showToast("🎉 Slides extracted! Opening YT2PDFS to download your PDF...");
-        if (event.data?.job_id) {
-          let webBase = event.data.backend_base || "https://yt2pdfs.com";
-          if (!webBase.includes("localhost") && !webBase.includes("127.0.0.1")) {
-            webBase = "https://yt2pdfs.com";
-          }
-          const destinationUrl = `${webBase}/?job_id=${event.data.job_id}`;
-          setTimeout(() => {
-            window.location.href = destinationUrl;
-          }, 400);
-        }
-      } else if (event.data?.type === "YT2PDF_HEADLESS_ERROR") {
-        clearTimeout(watchdog);
-        window.removeEventListener("message", onMessage);
-        try { iframe.remove(); } catch(e) {}
-        showToast("Slide extraction error: " + (event.data.error || "Unknown error"), true);
-        resetButton(buttonEl);
-      }
-    };
-
-    window.addEventListener("message", onMessage);
-    document.body.appendChild(iframe);
+    });
   }
 
   // ─────────────────────────────────────────────

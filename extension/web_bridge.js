@@ -131,22 +131,20 @@
     }, 600000);
 
     try {
-      const embedUrl = `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&enablejsapi=1&yt2pdf_headless=1`;
-      const iframe = document.createElement("iframe");
-      iframe.id = "yt2pdf-silent-extractor";
-      iframe.src = embedUrl;
-      iframe.allow = "autoplay";
-      iframe.style.cssText = "position:fixed;top:-9999px;left:-9999px;width:1280px;height:720px;opacity:0.001;pointer-events:none;border:none;z-index:-99999;";
-
-      iframe.onerror = (e) => {
-        console.warn("[YT2PDF Bridge] Iframe error:", e);
-        dispatchResult({ success: false, error: "Failed to initialize YouTube video stream." });
-      };
-
-      document.body.appendChild(iframe);
-      activeExtractorIframe = iframe;
+      chrome.runtime.sendMessage({
+        action: "start_background_extraction",
+        video_url: videoUrl,
+        origin_url: window.location.origin
+      }, (response) => {
+        if (chrome.runtime.lastError || (response && !response.success)) {
+          dispatchResult({
+            success: false,
+            error: chrome.runtime.lastError?.message || response?.error || "Failed to start background extraction."
+          });
+        }
+      });
     } catch (e) {
-      dispatchResult({ success: false, error: "Iframe initialization error: " + e.message });
+      dispatchResult({ success: false, error: "Extraction error: " + e.message });
     }
   }
 
