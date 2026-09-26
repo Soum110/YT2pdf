@@ -523,20 +523,63 @@ async def download_guide_pdf(job_id: str):
         guide_md = ""
         if md_path.exists():
             guide_md = md_path.read_text(encoding="utf-8")
-        else:
-            from study_guide_service import _generate_deterministic_markdown
-            guide_md = _generate_deterministic_markdown(video_title=video_title, total_duration=duration)
-            md_path.write_text(guide_md, encoding="utf-8")
 
-        from pdf_study_guide_compiler import compile_markdown_to_pdf, _compile_fpdf_fallback
-        compiled = compile_markdown_to_pdf(
-            markdown_content=guide_md,
-            output_path=pdf_path,
-            video_title=video_title,
-            total_duration=duration,
-        )
-        if not compiled or not pdf_path.exists() or pdf_path.stat().st_size < 500:
-            _compile_fpdf_fallback(guide_md, pdf_path, video_title)
+        # If markdown is missing, synthesize on-the-fly using available slides and transcript
+        if not guide_md or len(guide_md.strip()) < 300:
+            slides_dir = job_dir / "slides"
+            slide_imgs = sorted(list(slides_dir.glob("*.png")) + list(slides_dir.glob("*.jpg"))) if slides_dir.exists() else []
+            tr_file = job_dir / "transcript.json"
+            tr_data = []
+            if tr_file.exists():
+                try:
+                    tr_data = json.loads(tr_file.read_text())
+                except Exception:
+                    pass
+
+            audio_cand = None
+            for aname in ["audio.mp4", "audio.webm", "audio.mp3", "audio.m4a"]:
+                ap = job_dir / aname
+                if ap.exists() and ap.stat().st_size > 8000:
+                    audio_cand = ap
+                    break
+
+            if slide_imgs or tr_data or audio_cand:
+                log.info("[%s] Synthesizing study guide on-the-fly for download request...", job_id)
+                try:
+                    from study_guide_service import generate_study_guide
+                    guide_md = generate_study_guide(
+                        slide_images=slide_imgs,
+                        transcript_segments=tr_data,
+                        audio_path=audio_cand,
+                        video_title=video_title,
+                        total_duration=duration,
+                        gemini_api_key=GEMINI_API_KEY,
+                    )
+                    if guide_md and len(guide_md.strip()) >= 300:
+                        md_path.write_text(guide_md, encoding="utf-8")
+                except Exception as synth_err:
+                    log.warning("[%s] On-the-fly study guide synthesis notice: %s", job_id, synth_err)
+
+        from pdf_study_guide_compiler import compile_markdown_to_pdf, _compile_fpdf_fallback, is_valid_study_guide_markdown
+        if is_valid_study_guide_markdown(guide_md):
+            compiled = compile_markdown_to_pdf(
+                markdown_content=guide_md,
+                output_path=pdf_path,
+                video_title=video_title,
+                total_duration=duration,
+            )
+            if not compiled or not pdf_path.exists() or pdf_path.stat().st_size < 500:
+                _compile_fpdf_fallback(guide_md, pdf_path, video_title)
+
+            # Update outputs.json so future requests know study guide is ready
+            if pdf_path.exists() and pdf_path.stat().st_size >= 500:
+                try:
+                    outs_f = job_dir / "outputs.json"
+                    outs_data = json.loads(outs_f.read_text()) if outs_f.exists() else {}
+                    outs_data["study_guide_pdf"] = True
+                    outs_f.write_text(json.dumps(outs_data))
+                except Exception:
+                    pass
 
     if not pdf_path.exists() or pdf_path.stat().st_size < 500:
         raise HTTPException(status_code=404, detail="Study guide PDF not ready yet or job not found.")

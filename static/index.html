@@ -3516,10 +3516,16 @@
   async function downloadGuide() {
     if (!jobId || isDownloadingGuide) return;
     isDownloadingGuide = true;
-    const url = getDownloadUrl(`/api/download/${jobId}/guide`);
+    const guideBtn = document.getElementById("dl-guide-btn");
+    const guideText = document.getElementById("guide-btn-text");
+    const guideSub = document.getElementById("guide-btn-sub");
+    const origText = guideText ? guideText.textContent : "Download Study Guide";
+    const origSub = guideSub ? guideSub.textContent : "Full Academic Chapter (PDF)";
+
+    if (guideText) guideText.textContent = "Generating Study Guide...";
+    if (guideSub) guideSub.textContent = "AI synthesizing chapter from slides...";
 
     try {
-      // Primary Strategy: Fetch blob directly to ensure saving with accurate filename
       const res = await apiFetch(`/api/download/${jobId}/guide`);
       if (res.ok) {
         const blob = await res.blob();
@@ -3534,21 +3540,17 @@
             a.remove();
             window.URL.revokeObjectURL(blobUrl);
           }, 2000);
+          showToast("Study guide downloaded successfully!");
           return;
         }
       }
-      throw new Error("Blob fetch response invalid");
+      showToast("Study guide is not available for this video.");
     } catch (err) {
-      console.warn("Direct blob guide download failed, falling back to direct link trigger:", err);
-      // Fallback Strategy: Direct link trigger ONLY if blob fetch failed
-      const a = document.createElement("a");
-      a.href = url;
-      a.setAttribute("download", `study_guide_${jobId}.pdf`);
-      a.target = "_blank";
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => a.remove(), 500);
+      console.warn("Guide download notice:", err);
+      showToast("Could not download study guide. Please try again.");
     } finally {
+      if (guideText) guideText.textContent = origText;
+      if (guideSub) guideSub.textContent = origSub;
       setTimeout(() => {
         isDownloadingGuide = false;
       }, 1500);

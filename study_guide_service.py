@@ -41,11 +41,12 @@ Err on the side of giving too much detail. Leave no slide unexplained.
 Use bolding, bulleted, and numbered lists extensively for readability.
 Bridge the gaps between sparse slide text and the rich transcript audio.
 
-STRICT GROUNDING & ANTI-HALLUCINATION RULES:
-- You must ONLY teach concepts, definitions, formulas, workflows, and comparisons that are explicitly visible in the provided lecture slides or spoken in the audio/transcript.
+STRICT GROUNDING & PEDAGOGY RULES:
+- You must teach all concepts, architectures, comparison matrices, mechanisms, and definitions thoroughly based on the provided visual lecture slides, audio track, and/or transcript.
+- If an audio track or transcript is NOT provided, you MUST carefully examine every slide image: read all tables, architectural diagrams, bullet points, headers, and notes visible on the slides. Teach every concept shown on the slides in full academic depth using the required 6-part pedagogical structure.
 - Do NOT hallucinate generic meta-commentary, placeholders, or vague filler (e.g., NEVER say "The instructor introduces the core principles and context", "systematically explores key mechanisms", or "Pay close attention to underlying assumptions").
-- If the slide images and audio transcript are missing, unreadable, or empty, do NOT guess or generalize based on the lecture title alone. Instead, return exactly:
-  "ERROR: Multimodal lecture assets (slides/audio/transcript) could not be processed or lecture content could not be grounded."
+- If NEITHER slide images NOR transcript NOR audio are provided (or all are completely blank/unreadable), only then return:
+  "ERROR: No multimodal lecture assets available to ground study guide."
 """
 
 
@@ -244,6 +245,8 @@ def generate_study_guide(
             user_prompt += "Audio Track Attached: Yes (listen carefully to instructor explanations, definitions, examples)\n"
         if transcript_text:
             user_prompt += f"\n## Spoken Lecture Transcript:\n{transcript_text[:65000]}\n"
+        else:
+            user_prompt += "\nNote: Spoken audio track and transcript are not attached for this video. Please examine all visual slide images with extreme precision: extract every table, comparison, bullet point, parameter, formula, and diagram shown on the slides. Teach every concept visible on these slides in complete academic depth using the required 6-part pedagogical structure.\n"
 
         user_prompt += (
             "\nTask: Synthesize a textbook-grade, concept-by-concept academic study guide in detailed markdown following the exact 6-part structure.\n"
