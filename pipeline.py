@@ -649,52 +649,32 @@ def run_pipeline(job_id: str, video_url: str, jobs_root: Path, gemini_api_key: s
         except Exception:
             pass
 
-        if gemini_api_key and gemini_api_key != "YOUR_GEMINI_API_KEY_HERE":
-            try:
-                log.info("[%s] Synthesizing study guide with Gemini (%d transcript segments)...", job_id, len(transcript_segments))
-                from study_guide_generator import generate_study_guide_content
-                from pdf_study_guide import build_study_guide_pdf
+        guide_ready = False
+        try:
+            log.info("[%s] Synthesizing comprehensive AI study guide...", job_id)
+            from study_guide_service import generate_study_guide
+            from pdf_study_guide_compiler import compile_markdown_to_pdf
 
-                study_guide = generate_study_guide_content(
-                    slides=verified,
-                    transcript_segments=transcript_segments,
-                    total_duration=float(duration),
-                    gemini_api_key=gemini_api_key,
-                    crops_dir=crops_dir,
-                    gemini_model="gemini-2.0-flash",
-                    video_title=video_title,
-                )
-                guide_pdf_path = job_dir / "study_guide.pdf"
-                build_study_guide_pdf(
-                    study_guide=study_guide,
-                    output_path=guide_pdf_path,
-                    video_title=video_title,
-                )
-                guide_ready = guide_pdf_path.exists() and guide_pdf_path.stat().st_size > 1500
-                log.info("[%s] Study guide PDF ready: %s (size: %d bytes)", job_id, guide_ready, guide_pdf_path.stat().st_size if guide_pdf_path.exists() else 0)
-            except Exception as guide_err:
-                log.warning("[%s] Study guide synthesis error: %s", job_id, guide_err)
+            guide_md = generate_study_guide(
+                slide_images=[s.image_path for s in verified],
+                transcript_segments=transcript_segments,
+                audio_path=audio_file if 'audio_file' in locals() and audio_file.exists() else None,
+                video_title=video_title,
+                total_duration=float(duration),
+                gemini_api_key=gemini_api_key,
+            )
+            (job_dir / "study_guide.md").write_text(guide_md, encoding="utf-8")
 
-        if not guide_ready and verified:
-            try:
-                from study_guide_generator import generate_deterministic_study_guide
-                from pdf_study_guide import build_study_guide_pdf
-                det_guide = generate_deterministic_study_guide(
-                    slides=verified,
-                    transcript_segments=transcript_segments,
-                    video_title=video_title,
-                    total_duration=float(duration),
-                    crops_dir=crops_dir,
-                )
-                guide_pdf_path = job_dir / "study_guide.pdf"
-                build_study_guide_pdf(
-                    study_guide=det_guide,
-                    output_path=guide_pdf_path,
-                    video_title=video_title,
-                )
-                guide_ready = guide_pdf_path.exists() and guide_pdf_path.stat().st_size > 1500
-            except Exception as det_err:
-                log.warning("[%s] Fallback study guide compilation error: %s", job_id, det_err)
+            guide_pdf_path = job_dir / "study_guide.pdf"
+            guide_ready = compile_markdown_to_pdf(
+                markdown_content=guide_md,
+                output_path=guide_pdf_path,
+                video_title=video_title,
+                total_duration=float(duration),
+            )
+            log.info("[%s] Study guide PDF ready: %s (size: %d bytes)", job_id, guide_ready, guide_pdf_path.stat().st_size if guide_pdf_path.exists() else 0)
+        except Exception as guide_err:
+            log.warning("[%s] Study guide generation error: %s", job_id, guide_err)
 
         if guide_ready:
             (job_dir / "outputs.json").write_text(json.dumps({
@@ -923,54 +903,32 @@ def run_pipeline_from_frames(
         except Exception:
             pass
 
-        if gemini_api_key and gemini_api_key != "YOUR_GEMINI_API_KEY_HERE":
-            try:
-                log.info("[%s] Synthesizing companion study guide with Gemini (%d transcript segments, audio=%s)...",
-                         job_id, len(transcript_segments), bool(audio_file_candidate))
-                from study_guide_generator import generate_study_guide_content
-                from pdf_study_guide import build_study_guide_pdf
+        guide_ready = False
+        try:
+            log.info("[%s] Synthesizing companion AI study guide (audio=%s)...", job_id, bool(audio_file_candidate))
+            from study_guide_service import generate_study_guide
+            from pdf_study_guide_compiler import compile_markdown_to_pdf
 
-                study_guide = generate_study_guide_content(
-                    slides=verified,
-                    transcript_segments=transcript_segments,
-                    total_duration=float(duration),
-                    gemini_api_key=gemini_api_key,
-                    crops_dir=crops_dir,
-                    gemini_model="gemini-2.0-flash",
-                    audio_path=audio_file_candidate,
-                    video_title=video_title,
-                )
-                guide_pdf_path = job_dir / "study_guide.pdf"
-                build_study_guide_pdf(
-                    study_guide=study_guide,
-                    output_path=guide_pdf_path,
-                    video_title=video_title,
-                )
-                guide_ready = guide_pdf_path.exists() and guide_pdf_path.stat().st_size > 1500
-                log.info("[%s] Companion study guide PDF ready: %s (size: %d bytes)", job_id, guide_ready, guide_pdf_path.stat().st_size if guide_pdf_path.exists() else 0)
-            except Exception as guide_err:
-                log.warning("[%s] Companion study guide generation failed: %s", job_id, guide_err)
+            guide_md = generate_study_guide(
+                slide_images=[s.image_path for s in verified],
+                transcript_segments=transcript_segments,
+                audio_path=audio_file_candidate,
+                video_title=video_title,
+                total_duration=float(duration),
+                gemini_api_key=gemini_api_key,
+            )
+            (job_dir / "study_guide.md").write_text(guide_md, encoding="utf-8")
 
-        if not guide_ready and verified:
-            try:
-                from study_guide_generator import generate_deterministic_study_guide
-                from pdf_study_guide import build_study_guide_pdf
-                det_guide = generate_deterministic_study_guide(
-                    slides=verified,
-                    transcript_segments=transcript_segments,
-                    video_title=video_title,
-                    total_duration=float(duration),
-                    crops_dir=crops_dir,
-                )
-                guide_pdf_path = job_dir / "study_guide.pdf"
-                build_study_guide_pdf(
-                    study_guide=det_guide,
-                    output_path=guide_pdf_path,
-                    video_title=video_title,
-                )
-                guide_ready = guide_pdf_path.exists() and guide_pdf_path.stat().st_size > 1500
-            except Exception as det_err:
-                log.warning("[%s] Companion fallback study guide failed: %s", job_id, det_err)
+            guide_pdf_path = job_dir / "study_guide.pdf"
+            guide_ready = compile_markdown_to_pdf(
+                markdown_content=guide_md,
+                output_path=guide_pdf_path,
+                video_title=video_title,
+                total_duration=float(duration),
+            )
+            log.info("[%s] Companion study guide PDF ready: %s (size: %d bytes)", job_id, guide_ready, guide_pdf_path.stat().st_size if guide_pdf_path.exists() else 0)
+        except Exception as guide_err:
+            log.warning("[%s] Companion study guide generation failed: %s", job_id, guide_err)
 
         (job_dir / "outputs.json").write_text(json.dumps({
             "slides_pdf": True,
@@ -1153,52 +1111,31 @@ def run_pipeline_from_video_file(
 
         # 6. Generate Comprehensive AI Study Guide
         guide_ready = False
-        if gemini_api_key and gemini_api_key != "YOUR_GEMINI_API_KEY_HERE":
-            try:
-                log.info("[%s] Synthesizing study guide for uploaded video...", job_id)
-                from study_guide_generator import generate_study_guide_content
-                from pdf_study_guide import build_study_guide_pdf
+        try:
+            log.info("[%s] Synthesizing study guide for uploaded video...", job_id)
+            from study_guide_service import generate_study_guide
+            from pdf_study_guide_compiler import compile_markdown_to_pdf
 
-                study_guide = generate_study_guide_content(
-                    slides=verified,
-                    transcript_segments=[],
-                    total_duration=float(duration),
-                    gemini_api_key=gemini_api_key,
-                    crops_dir=crops_dir,
-                    gemini_model="gemini-2.0-flash",
-                    audio_path=audio_path,
-                    video_title=video_title,
-                )
-                guide_pdf_path = job_dir / "study_guide.pdf"
-                build_study_guide_pdf(
-                    study_guide=study_guide,
-                    output_path=guide_pdf_path,
-                    video_title=video_title,
-                )
-                guide_ready = guide_pdf_path.exists() and guide_pdf_path.stat().st_size > 1500
-            except Exception as guide_err:
-                log.warning("[%s] Uploaded video study guide synthesis error: %s", job_id, guide_err)
+            guide_md = generate_study_guide(
+                slide_images=[s.image_path for s in verified],
+                transcript_segments=[],
+                audio_path=audio_path,
+                video_title=video_title,
+                total_duration=float(duration),
+                gemini_api_key=gemini_api_key,
+            )
+            (job_dir / "study_guide.md").write_text(guide_md, encoding="utf-8")
 
-        if not guide_ready and verified:
-            try:
-                from study_guide_generator import generate_deterministic_study_guide
-                from pdf_study_guide import build_study_guide_pdf
-                det_guide = generate_deterministic_study_guide(
-                    slides=verified,
-                    transcript_segments=[],
-                    video_title=video_title,
-                    total_duration=float(duration),
-                    crops_dir=crops_dir,
-                )
-                guide_pdf_path = job_dir / "study_guide.pdf"
-                build_study_guide_pdf(
-                    study_guide=det_guide,
-                    output_path=guide_pdf_path,
-                    video_title=video_title,
-                )
-                guide_ready = guide_pdf_path.exists() and guide_pdf_path.stat().st_size > 1500
-            except Exception as det_err:
-                log.warning("[%s] Deterministic study guide error: %s", job_id, det_err)
+            guide_pdf_path = job_dir / "study_guide.pdf"
+            guide_ready = compile_markdown_to_pdf(
+                markdown_content=guide_md,
+                output_path=guide_pdf_path,
+                video_title=video_title,
+                total_duration=float(duration),
+            )
+            log.info("[%s] Uploaded video study guide PDF ready: %s (size: %d bytes)", job_id, guide_ready, guide_pdf_path.stat().st_size if guide_pdf_path.exists() else 0)
+        except Exception as guide_err:
+            log.warning("[%s] Uploaded video study guide synthesis error: %s", job_id, guide_err)
 
         (job_dir / "outputs.json").write_text(json.dumps({
             "slides_pdf": True,

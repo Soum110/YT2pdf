@@ -328,6 +328,25 @@
   async function extractAudioTrackFromPage() {
     try {
       console.log("[YT2PDF Companion] Detecting audio stream from YouTube session...");
+
+      // Strategy 1: Check performance resource timing for active googlevideo audio stream
+      try {
+        const resEntries = performance.getEntriesByType("resource");
+        for (let i = resEntries.length - 1; i >= 0; i--) {
+          const rName = resEntries[i].name || "";
+          if (rName.includes("googlevideo.com/videoplayback") &&
+              (rName.includes("mime=audio") || rName.includes("itag=140") || rName.includes("itag=249") || rName.includes("itag=250") || rName.includes("itag=251"))) {
+            let cleanAudioUrl = rName.replace(/&range=[^&]+/, "").replace(/&rn=[^&]+/, "");
+            const mimeType = (rName.includes("webm") || rName.includes("audio%2Fwebm")) ? "audio/webm" : "audio/mp4";
+            console.log(`[YT2PDF Companion] Discovered active player audio stream from Performance API (${mimeType}).`);
+            return { audio_url: cleanAudioUrl, mime_type: mimeType, bitrate: 128000 };
+          }
+        }
+      } catch (perfErr) {
+        console.debug("[YT2PDF Companion] Performance resource scan notice:", perfErr);
+      }
+
+      // Strategy 2: Query main-world player or window.ytInitialPlayerResponse
       const audioResult = await new Promise((resolve) => {
         const handler = (e) => {
           window.removeEventListener("yt2pdf_audio_reply", handler);
@@ -337,7 +356,7 @@
         setTimeout(() => {
           window.removeEventListener("yt2pdf_audio_reply", handler);
           resolve(null);
-        }, 1000);
+        }, 1200);
 
         const s = document.createElement("script");
         s.textContent = `
@@ -348,6 +367,9 @@
               let bitrate = 0;
               const player = document.getElementById("movie_player");
               let sData = player?.getStreamingData ? player.getStreamingData() : null;
+              if (!sData && player?.getPlayerResponse) {
+                sData = player.getPlayerResponse()?.streamingData;
+              }
               if (!sData && window.ytInitialPlayerResponse?.streamingData) {
                 sData = window.ytInitialPlayerResponse.streamingData;
               }
@@ -360,6 +382,20 @@
                     audioUrl = withUrl[0].url;
                     mimeType = withUrl[0].mimeType ? withUrl[0].mimeType.split(";")[0] : "audio/mp4";
                     bitrate = withUrl[0].bitrate || 0;
+                  } else {
+                    for (const f of audioFormats) {
+                      const cStr = f.signatureCipher || f.cipher || "";
+                      if (cStr && cStr.includes("url=")) {
+                        const params = new URLSearchParams(cStr);
+                        const parsedUrl = params.get("url");
+                        if (parsedUrl) {
+                          audioUrl = parsedUrl;
+                          mimeType = f.mimeType ? f.mimeType.split(";")[0] : "audio/mp4";
+                          bitrate = f.bitrate || 0;
+                          break;
+                        }
+                      }
+                    }
                   }
                 }
               }
@@ -1073,18 +1109,38 @@
       }
 
       let audioInfo = null;
-      // High-Yield Data Saver:
-      // If we already have the complete spoken transcript (~30 KB), skip downloading/uploading
-      // 50-100 MB of raw audio track, saving massive amounts of internet bandwidth!
-      if (!transcriptSegments || transcriptSegments.length === 0) {
+      try {
+        console.log("[YT2PDF Companion] Gathering audio track for multimodal AI study guide...");
+        audioInfo = await extractAudioTrackFromPage();
+      } catch (aErr) {
+        console.warn("[YT2PDF Companion] Local audio extraction notice:", aErr);
+      }
+
+      // If local audio stream was not found, request from parent watch page
+      if ((!audioInfo || !audioInfo.audio_url) && window.parent && window.parent !== window) {
         try {
-          console.log("[YT2PDF Companion] No transcript found. Fetching audio track fallback for AI study guide...");
-          audioInfo = await extractAudioTrackFromPage();
-        } catch (aErr) {
-          console.warn("[YT2PDF Companion] Audio extraction notice:", aErr);
+          console.log("[YT2PDF Companion] Requesting parent watch page audio stream...");
+          const parentAud = await new Promise((resolve) => {
+            const onAudioReply = (e) => {
+              if (e.data && e.data.type === "YT2PDF_AUDIO_REPLY") {
+                window.removeEventListener("message", onAudioReply);
+                resolve(e.data.audioInfo || null);
+              }
+            };
+            window.addEventListener("message", onAudioReply);
+            window.parent.postMessage({ type: "YT2PDF_REQUEST_AUDIO" }, "*");
+            setTimeout(() => {
+              window.removeEventListener("message", onAudioReply);
+              resolve(null);
+            }, 3000);
+          });
+          if (parentAud && parentAud.audio_url) {
+            audioInfo = parentAud;
+            console.log(`[YT2PDF Companion] Received audio stream from parent watch page (${audioInfo.mime_type}).`);
+          }
+        } catch (pAudErr) {
+          console.warn("[YT2PDF Companion] Parent audio request notice:", pAudErr);
         }
-      } else {
-        console.log(`[YT2PDF Companion] Spoken transcript available (${transcriptSegments.length} segments). Skipping heavy audio stream download to save user data!`);
       }
 
       const payload = {
@@ -1276,7 +1332,7 @@
     }
 
     // 100% Invisible In-Page Silent Headless Extraction (ZERO Tabs, ZERO Windows)
-    // Cache transcript immediately in parent watch page context
+    // Cache transcript & audio immediately in parent watch page context
     let parentTranscript = [];
     extractTranscriptFromPage().then(tr => {
       if (tr && tr.length > 0) {
@@ -1285,6 +1341,16 @@
       }
     }).catch(e => {
       console.warn("[YT2PDF Companion] Parent transcript pre-extraction note:", e);
+    });
+
+    let parentAudioInfo = null;
+    extractAudioTrackFromPage().then(aud => {
+      if (aud && aud.audio_url) {
+        parentAudioInfo = aud;
+        console.log(`[YT2PDF Companion] Parent watch page pre-extracted audio stream (${aud.mime_type}).`);
+      }
+    }).catch(e => {
+      console.warn("[YT2PDF Companion] Parent audio pre-extraction note:", e);
     });
 
     let frame = document.getElementById("yt2pdf-headless-frame");
@@ -1329,6 +1395,18 @@
             frame.contentWindow.postMessage({
               type: "YT2PDF_TRANSCRIPT_REPLY",
               transcript: parentTranscript || []
+            }, "*");
+          } catch(e) {}
+        }
+        return;
+      }
+
+      if (event.data.type === "YT2PDF_REQUEST_AUDIO") {
+        if (frame && frame.contentWindow) {
+          try {
+            frame.contentWindow.postMessage({
+              type: "YT2PDF_AUDIO_REPLY",
+              audioInfo: parentAudioInfo || null
             }, "*");
           } catch(e) {}
         }
