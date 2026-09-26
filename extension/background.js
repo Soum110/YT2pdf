@@ -350,7 +350,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; // Keep message channel open for async response
   }
 
-  // 6. Reliable Website Redirection in a NEW tab (bypasses browser popup blockers, preserves YouTube tab)
+  // 6. Direct Client-Side PDF Download via Chrome Downloads API
+  if (message.action === "download_pdf") {
+    const filename = (message.filename || "Lecture_Slides.pdf").replace(/[/\\?%*:|"<>]/g, '_');
+    const safeName = filename.endsWith(".pdf") ? filename : `${filename}.pdf`;
+    console.log("[YT2PDF Background] Initiating direct PDF download for:", safeName);
+    
+    if (chrome.downloads && chrome.downloads.download) {
+      chrome.downloads.download({
+        url: message.url,
+        filename: safeName,
+        saveAs: false
+      }, (downloadId) => {
+        if (chrome.runtime.lastError) {
+          console.warn("[YT2PDF Background] chrome.downloads error:", chrome.runtime.lastError.message);
+          sendResponse({ success: false, error: chrome.runtime.lastError.message });
+        } else {
+          console.log("[YT2PDF Background] Download started successfully! ID:", downloadId);
+          sendResponse({ success: true, downloadId: downloadId });
+        }
+      });
+      return true;
+    } else {
+      sendResponse({ success: false, error: "Downloads API not available" });
+      return false;
+    }
+  }
+
+  // 7. Reliable Website Redirection in a NEW tab (bypasses browser popup blockers, preserves YouTube tab)
   if ((message.action === "open_website_tab" || message.action === "open_tab")) {
     if (message.job_id) {
       openJobInNewTab(message.job_id, message.base || message.url);

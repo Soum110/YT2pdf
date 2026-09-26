@@ -1118,163 +1118,67 @@
 
       console.log(`[YT2PDF Companion] Silent background extraction complete (${capturedSlides.length} slides). Transmitting...`);
 
-      let transcriptSegments = [];
-      try {
-        transcriptSegments = await Promise.race([
-          extractTranscriptFromPage(),
-          unthrottledSleep(6000).then(() => [])
-        ]);
-      } catch (trErr) {
-        console.warn("[YT2PDF Companion] Transcript extraction error:", trErr);
-      }
+      console.log(`[YT2PDF Companion] Silent extraction complete (${capturedSlides.length} slides). Compiling PDF directly in browser...`);
 
-      // If local iframe transcript was empty, ask parent watch page directly
-      if ((!transcriptSegments || transcriptSegments.length === 0) && window.parent && window.parent !== window) {
-        try {
-          console.log("[YT2PDF Companion] Requesting parent watch page transcript...");
-          const parentTr = await new Promise((resolve) => {
-            const onMeta = (e) => {
-              if (e.data && e.data.type === "YT2PDF_TRANSCRIPT_REPLY") {
-                window.removeEventListener("message", onMeta);
-                resolve(e.data.transcript || []);
-              }
-            };
-            window.addEventListener("message", onMeta);
-            window.parent.postMessage({ type: "YT2PDF_REQUEST_TRANSCRIPT" }, "*");
-            setTimeout(() => {
-              window.removeEventListener("message", onMeta);
-              resolve([]);
-            }, 3500);
-          });
-          if (parentTr && parentTr.length > 0) {
-            transcriptSegments = parentTr;
-            console.log(`[YT2PDF Companion] Received ${transcriptSegments.length} transcript segments from parent watch page!`);
-          }
-        } catch (pErr) {
-          console.warn("[YT2PDF Companion] Parent transcript request notice:", pErr);
-        }
-      }
-
-      let audioInfo = null;
-      try {
-        console.log("[YT2PDF Companion] Gathering audio track for multimodal AI study guide...");
-        audioInfo = await extractAudioTrackFromPage();
-      } catch (aErr) {
-        console.warn("[YT2PDF Companion] Local audio extraction notice:", aErr);
-      }
-
-      // If local audio stream was not found, request from parent watch page
-      if ((!audioInfo || !audioInfo.audio_url) && window.parent && window.parent !== window) {
-        try {
-          console.log("[YT2PDF Companion] Requesting parent watch page audio stream...");
-          const parentAud = await new Promise((resolve) => {
-            const onAudioReply = (e) => {
-              if (e.data && e.data.type === "YT2PDF_AUDIO_REPLY") {
-                window.removeEventListener("message", onAudioReply);
-                resolve(e.data.audioInfo || null);
-              }
-            };
-            window.addEventListener("message", onAudioReply);
-            window.parent.postMessage({ type: "YT2PDF_REQUEST_AUDIO" }, "*");
-            setTimeout(() => {
-              window.removeEventListener("message", onAudioReply);
-              resolve(null);
-            }, 3000);
-          });
-          if (parentAud && parentAud.audio_url) {
-            audioInfo = parentAud;
-            console.log(`[YT2PDF Companion] Received audio stream from parent watch page (${audioInfo.mime_type}).`);
-          }
-        } catch (pAudErr) {
-          console.warn("[YT2PDF Companion] Parent audio request notice:", pAudErr);
-        }
-      }
-
-      const payload = {
-        video_url: cleanUrl,
-        video_id: videoId,
-        title: videoTitle,
-        duration: duration,
-        frames: capturedSlides,
-        transcript: transcriptSegments,
-        audio_url: audioInfo ? audioInfo.audio_url : null,
-        audio_mime: audioInfo ? audioInfo.mime_type : "audio/mp4",
-      };
-
-      const notifyParentComplete = (jobId, base) => {
-        if (window.parent && window.parent !== window) {
-          try {
-            window.parent.postMessage({
-              type: "YT2PDF_HEADLESS_COMPLETE",
-              success: true,
-              job_id: jobId,
-              backend_base: base,
-              slide_count: capturedSlides.length
-            }, "*");
-          } catch(e) {}
-        }
-      };
-
-      const notifyParentError = (errMsg) => {
-        if (window.parent && window.parent !== window) {
-          try {
-            window.parent.postMessage({
-              type: "YT2PDF_HEADLESS_ERROR",
-              error: errMsg
-            }, "*");
-          } catch(e) {}
-        }
-      };
-
-      const isRedirectRequested = new URLSearchParams(window.location.search).get("yt2pdf_redirect") === "1";
-      payload.redirect_on_success = isRedirectRequested;
-
-      // Broadcast progress that frame scanning is done and upload is beginning
+      // Broadcast progress that frame scanning is done and PDF compilation begins
       safeSendRuntimeMessage({
         action: "headless_progress",
         current: finalPoints.length,
         total: finalPoints.length,
-        stage: "uploading"
+        stage: "building_pdf"
       });
 
-      const handleUploadSuccess = (jobId, base) => {
-        // 1. Notify background worker so it closes the window and redirects origin tab!
-        safeSendRuntimeMessage({
-          action: "headless_extraction_direct_success",
-          data: {
-            job_id: jobId,
-            backend_base: base,
-            slide_count: capturedSlides.length
+      const cleanTitle = (videoTitle || "Lecture_Slides").replace(/[/\\?%*:|"<>]/g, '_').trim();
+      const filename = `${cleanTitle}_Slides.pdf`;
+
+      try {
+        if (typeof ClientPdfBuilder === "undefined" || !ClientPdfBuilder.generatePdfFromJpegList) {
+          throw new Error("ClientPdfBuilder not loaded in page context.");
+        }
+
+        const pdfBlob = ClientPdfBuilder.generatePdfFromJpegList(capturedSlides);
+        console.log(`[YT2PDF Companion] PDF generated (${Math.round(pdfBlob.size / 1024)} KB)! Triggering download...`);
+
+        // Convert blob to Data URL for Chrome downloads API in background worker
+        const reader = new FileReader();
+        reader.onloadend = function() {
+          const dataUrl = reader.result;
+          safeSendRuntimeMessage({
+            action: "download_pdf",
+            url: dataUrl,
+            filename: filename
+          });
+
+          // Also trigger direct anchor download in page as fallback
+          try {
+            ClientPdfBuilder.downloadPdfBlob(pdfBlob, filename);
+          } catch(e) {}
+
+          // Notify parent frame
+          if (window.parent && window.parent !== window) {
+            try {
+              window.parent.postMessage({
+                type: "YT2PDF_HEADLESS_COMPLETE",
+                success: true,
+                slide_count: capturedSlides.length,
+                filename: filename
+              }, "*");
+            } catch(e) {}
           }
-        });
+        };
+        reader.readAsDataURL(pdfBlob);
 
-        // 2. Notify parent iframe if embedded
-        notifyParentComplete(jobId, base);
-      };
-
-      const handleUploadFailure = (errMsg) => {
-        console.error("[YT2PDF Companion] Upload failed:", errMsg);
-        safeSendRuntimeMessage({
-          action: "headless_extraction_failed",
-          error: errMsg
-        });
-        notifyParentError(errMsg);
-      };
-
-      // Upload frames safely using high-speed direct upload
-      uploadFramesSafely(payload)
-        .then((resData) => {
-          if (resData && (resData.job_id || resData.data?.job_id)) {
-            const finalJobId = resData.job_id || resData.data?.job_id;
-            const finalBase = resData.backend_base || resData.data?.backend_base || "https://yt2pdfs.com";
-            handleUploadSuccess(finalJobId, finalBase);
-          } else {
-            handleUploadFailure("Invalid response from server after uploading slides.");
-          }
-        })
-        .catch((uErr) => {
-          handleUploadFailure(uErr.message || "Failed to upload extracted slides.");
-        });
+      } catch (pdfErr) {
+        console.error("[YT2PDF Companion] Client PDF compilation error:", pdfErr);
+        if (window.parent && window.parent !== window) {
+          try {
+            window.parent.postMessage({
+              type: "YT2PDF_HEADLESS_ERROR",
+              error: pdfErr.message
+            }, "*");
+          } catch(e) {}
+        }
+      }
 
     } catch (err) {
       console.error("[YT2PDF Companion] Silent extraction error:", err);
@@ -1472,7 +1376,7 @@
 
         if (buttonEl && event.data.total) {
           const pct = Math.min(99, Math.round((event.data.current / event.data.total) * 100));
-          const label = (event.data.stage === "uploading" || pct >= 99) ? "Uploading..." : `${pct}%`;
+          const label = event.data.stage === "building_pdf" ? "Making PDF..." : `${pct}%`;
           buttonEl.innerHTML = `
             <svg class="yt2pdf-spinner" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
             <span>${label}</span>
@@ -1481,42 +1385,21 @@
       } else if (event.data.type === "YT2PDF_HEADLESS_COMPLETE") {
         cleanupHeadlessFrame();
         isExtracting = false;
-        const jobId = event.data.job_id;
-        let webBase = event.data.backend_base || "https://yt2pdfs.com";
-        if (!webBase.includes("localhost") && !webBase.includes("127.0.0.1")) {
-          webBase = "https://yt2pdfs.com";
-        }
-        const destinationUrl = `${webBase}/?job_id=${jobId}`;
+        const count = event.data.slide_count || 1;
+        const filename = event.data.filename || "Lecture_Slides.pdf";
 
         if (buttonEl) {
           buttonEl.innerHTML = `
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2BA640" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-            <span>Open Notes &rarr;</span>
+            <span>Downloaded (${count})</span>
           `;
-          buttonEl.title = "Click to open your extracted notes and download PDF on YT2PDFS.com";
-          buttonEl.onclick = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            window.open(destinationUrl, "_blank");
-          };
+          buttonEl.title = `Extracted ${count} slides. Downloaded "${filename}" to your computer!`;
         }
 
         showToast(
-          `🎉 Slides extracted! <a href="${destinationUrl}" target="_blank" style="color:#60A5FA;text-decoration:underline;margin-left:4px;font-weight:600;">View & Download PDF &rarr;</a>`,
-          false,
-          destinationUrl
+          `🎉 <strong>${count} slides extracted!</strong> Downloaded <em>${filename}</em> to your computer.`,
+          false
         );
-
-        safeSendRuntimeMessage({
-          action: "open_website_tab",
-          job_id: jobId,
-          base: webBase,
-          url: destinationUrl
-        });
-
-        try {
-          window.open(destinationUrl, "_blank");
-        } catch (e) {}
 
         setTimeout(() => resetButton(buttonEl), 15000);
       } else if (event.data.type === "YT2PDF_HEADLESS_ERROR") {

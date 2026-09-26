@@ -3,15 +3,12 @@ extractor.py — Hybrid CV + AI Slide Extractor (Step 1)
 =========================================================
 Two-Pass Slide Extraction:
   Pass 1: OpenCV + SSIM finds "candidate frames" where a slide transition occurs.
-  Pass 2: Gemini API verifies each candidate — filters webcam frames and annotated slides.
+  Pass 2: Qwen 3.8 27B API verifies each candidate — filters webcam frames and extracts slide titles.
 
 Usage:
     python extractor.py --video path/to/video.mp4 --output ./slides_out
     python extractor.py --video path/to/video.mp4 --output ./slides_out --ssim-threshold 0.85
     python extractor.py --video path/to/video.mp4 --output ./slides_out --skip-ai   # CV only
-
-Requirements:
-    pip install opencv-python-headless scikit-image google-genai Pillow numpy
 """
 
 import argparse
@@ -29,6 +26,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 import cv2
+import httpx
 import numpy as np
 from skimage.metrics import structural_similarity as ssim
 
@@ -55,15 +53,33 @@ class ExtractorConfig:
     ssim_threshold: float = 0.94         # Sensitive threshold to capture slide text/diagram changes
     debounce_seconds: int = 2            # Ignore frames for N seconds after a transition
 
-    # --- Pass 2: Gemini AI ---
-    gemini_api_key: str = "YOUR_GEMINI_API_KEY_HERE"   # <- Replace this
-    gemini_model: str = "gemini-2.0-flash"             # Fast, highly capable official model
+    # --- Pass 2: Qwen AI ---
+    qwen_api_key: str = ""
+    qwen_model: str = "qwen/qwen3.8-27b:free"
     ai_max_retries: int = 2
     ai_retry_delay: float = 1.0          # Seconds between retries
+
+    # Backward compatibility aliases
+    gemini_api_key: str = ""
+    gemini_model: str = "qwen/qwen3.8-27b:free"
 
     # --- Output ---
     output_dir: Path = Path("./slides_out")
     save_candidates: bool = False        # Save Pass-1 candidates (debug)
+
+    def __post_init__(self):
+        if self.gemini_api_key and not self.qwen_api_key:
+            self.qwen_api_key = self.gemini_api_key
+        if not self.qwen_api_key:
+            self.qwen_api_key = (
+                os.environ.get("QWEN_API_KEY", "")
+                or os.environ.get("OPENROUTER_API_KEY", "")
+                or os.environ.get("GEMINI_API_KEY", "")
+            )
+        if self.gemini_model and not self.qwen_model:
+            self.qwen_model = self.gemini_model
+        if "gemini" in (self.qwen_model or "").lower():
+            self.qwen_model = "qwen/qwen3.8-27b:free"
 
 
 # ---------------------------------------------------------------------------

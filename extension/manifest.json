@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "YT2PDF Slide Companion",
-  "version": "1.0.13",
-  "description": "Capture presentation slides from YouTube videos and generate clean, high-resolution study PDFs on YT2PDFS.com.",
+  "version": "1.1.0",
+  "description": "Capture presentation slides from YouTube videos and generate clean, high-resolution PDFs directly in your browser.",
   "icons": {
     "16": "icons/icon-16.png",
     "48": "icons/icon-48.png",
@@ -22,7 +22,7 @@
     "activeTab",
     "tabs",
     "scripting",
-    "declarativeNetRequest"
+    "downloads"
   ],
   "background": {
     "service_worker": "background.js"
@@ -33,7 +33,6 @@
     "*://*.googlevideo.com/*",
     "*://yt2pdfs.com/*",
     "*://www.yt2pdfs.com/*",
-    "https://*.run.app/*",
     "http://localhost/*",
     "http://127.0.0.1/*"
   ],
@@ -45,6 +44,7 @@
         "*://*.youtube-nocookie.com/embed/*"
       ],
       "js": [
+        "client_pdf_builder.js",
         "content.js"
       ],
       "all_frames": true,
@@ -54,7 +54,6 @@
       "matches": [
         "*://yt2pdfs.com/*",
         "*://www.yt2pdfs.com/*",
-        "https://*.run.app/*",
         "http://localhost/*",
         "http://127.0.0.1/*"
       ],

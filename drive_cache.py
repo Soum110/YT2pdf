@@ -186,11 +186,10 @@ class DriveCacheManager:
                 pass
 
         outputs_file = target_job_dir / "outputs.json"
-        has_guide = (target_job_dir / "study_guide.pdf").exists()
         if not outputs_file.exists():
             outputs_file.write_text(json.dumps({
                 "slides_pdf": True,
-                "study_guide_pdf": has_guide,
+                "study_guide_pdf": False,
                 "slide_count": slide_count,
             }))
 

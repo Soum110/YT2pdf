@@ -29,6 +29,7 @@
       } catch (e) {}
     })();
   </script>
+  <script src="/js/client_pdf_builder.js"></script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
@@ -2478,8 +2479,8 @@
               <line x1="12" y1="3" x2="12" y2="15"></line>
             </svg>
           </div>
-          <div class="dropzone-title">Click to upload lecture video, or drag and drop</div>
-          <div class="dropzone-desc">MP4, MOV, WEBM, or MKV. Processed 100% on the server without any extension.</div>
+          <div class="dropzone-title">Click to select lecture video, or drag and drop</div>
+          <div class="dropzone-desc">MP4, MOV, WEBM, or MKV. Processed 100% in your browser — zero wait, zero servers.</div>
         </div>
 
         <div class="file-selected-bar" id="file-selected-bar">
@@ -2487,8 +2488,8 @@
             <span class="file-name-text" id="selected-file-name">lecture.mp4</span>
             <span class="file-size-text" id="selected-file-size">(0 MB)</span>
           </div>
-          <button class="btn-primary" id="btn-upload-start" onclick="uploadSelectedVideo()">
-            <span>Extract Slides &amp; Study Guide</span>
+          <button class="btn-primary" id="btn-upload-start" onclick="startLocalVideoExtraction()">
+            <span>Extract Presentation Slides (In-Browser)</span>
           </button>
         </div>
 
@@ -2498,7 +2499,7 @@
             <path d="m9 12 2 2 4-4"/>
           </svg>
           <div>
-            <strong>100% Extension-Free • Direct Server Processing:</strong> Upload any lecture or presentation video directly from your device. No Chrome extension, YouTube cookies, or bot restrictions apply. Our server extracts slides, extracts lecture audio, and synthesizes both your slide deck and comprehensive AI study guide entirely in the cloud.
+            <strong>100% Private • In-Browser Processing:</strong> Your video is processed directly on your computer inside your browser. No files are ever uploaded to any server. Slides are extracted instantly and compiled into a clean PDF deck.
           </div>
         </div>
       </div>
@@ -2658,30 +2659,6 @@
         <button class="btn-primary" id="banner-dl-slides-btn" type="button" onclick="downloadSlides()" style="padding:10px 22px;font-size:14px;font-weight:600;display:inline-flex;align-items:center;gap:8px;background:#FF0000;color:#FFFFFF;border:none;border-radius:10px;cursor:pointer;box-shadow:0 4px 14px rgba(255,0,0,0.35);">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
           <span id="banner-dl-text">Download Slides PDF</span>
-        </button>
-      </div>
-
-      <!-- Deliverable 1: AI Comprehensive Study Guide -->
-      <div class="study-guide-card" id="study-guide-container">
-        <div class="guide-copy">
-          <div class="guide-tag-row">
-            <span class="badge-popular">Basic → Advanced</span>
-            <span style="font-size:12px;font-weight:600;color:var(--ink);">Academic Chapter</span>
-          </div>
-          <h2 class="guide-heading">Comprehensive Study Guide</h2>
-          <p class="guide-desc" id="guide-desc-text">
-            Complete academic textbook chapter with full mathematical derivations, LaTeX formulas, problem sets, and key lecture diagrams.
-          </p>
-          <div class="guide-features">
-            <span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> 6 Chapters</span>
-            <span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> Slide Formulas</span>
-            <span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> Solved Problems</span>
-            <span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> Formula Sheet</span>
-          </div>
-        </div>
-        <button class="btn-download-guide" id="dl-guide-btn" onclick="downloadGuide()" style="cursor:pointer;">
-          <span id="dl-guide-text">Download Study Guide</span>
-          <span class="sub-label" id="dl-guide-sub">Full Academic Chapter (PDF)</span>
         </button>
       </div>
 
@@ -3106,65 +3083,190 @@
     document.getElementById("file-selected-bar").style.display = "flex";
   }
 
-  function uploadSelectedVideo() {
+  let localPdfBlob = null;
+  let localPdfFilename = "Lecture_Slides.pdf";
+  let isLocalExtraction = false;
+
+  async function startLocalVideoExtraction() {
     if (!selectedUploadFile) return;
 
+    const file = selectedUploadFile;
     const btn = document.getElementById("btn-upload-start");
     btn.disabled = true;
+    isLocalExtraction = true;
     showProgress();
+
     updateProgress({
       stage: "uploading",
       progress: 5,
-      message: `Uploading ${selectedUploadFile.name}...`
+      message: `Loading ${file.name} locally in your browser (0 MB uploaded)...`
     });
 
-    const formData = new FormData();
-    formData.append("file", selectedUploadFile);
+    const videoUrl = URL.createObjectURL(file);
+    const video = document.createElement("video");
+    video.preload = "auto";
+    video.muted = true;
+    video.playsInline = true;
+    video.src = videoUrl;
 
-    const xhr = new XMLHttpRequest();
-    const uploadUrl = (activeBackendPrefix || "") + "/api/upload-video";
-    xhr.open("POST", uploadUrl, true);
+    try {
+      await new Promise((resolve, reject) => {
+        video.onloadedmetadata = () => resolve();
+        video.onerror = () => reject(new Error("Could not decode video file in your browser. Please ensure it is a valid MP4, MOV, or WEBM video."));
+      });
 
-    xhr.upload.onprogress = function(e) {
-      if (e.lengthComputable) {
-        const pct = Math.min(28, Math.round((e.loaded / e.total) * 28));
+      const duration = video.duration;
+      if (!duration || isNaN(duration) || duration <= 0) {
+        throw new Error("Unable to read video length.");
+      }
+
+      const totalSec = Math.floor(duration);
+      let step = 2;
+      if (totalSec > 7200) step = 6;
+      else if (totalSec > 3600) step = 4;
+      else if (totalSec > 1800) step = 3;
+
+      const timestamps = [];
+      for (let t = 0; t < totalSec; t += step) {
+        timestamps.push(t);
+      }
+      if (!timestamps.includes(Math.max(0, totalSec - 2))) {
+        timestamps.push(Math.max(0, totalSec - 2));
+      }
+
+      const captureCanvas = document.createElement("canvas");
+      captureCanvas.width = 1280;
+      captureCanvas.height = 720;
+      const captureCtx = captureCanvas.getContext("2d");
+
+      const thumbCanvas = document.createElement("canvas");
+      thumbCanvas.width = 64;
+      thumbCanvas.height = 36;
+      const thumbCtx = thumbCanvas.getContext("2d");
+
+      const lastThumbCanvas = document.createElement("canvas");
+      lastThumbCanvas.width = 64;
+      lastThumbCanvas.height = 36;
+      const lastThumbCtx = lastThumbCanvas.getContext("2d");
+
+      function isDifferent(c1, c2) {
+        const d1 = c1.getContext("2d").getImageData(0, 0, 64, 36).data;
+        const d2 = c2.getContext("2d").getImageData(0, 0, 64, 36).data;
+        let diffCount = 0;
+        let totalDiff = 0;
+        const totalPixels = 64 * 36;
+        for (let i = 0; i < d1.length; i += 4) {
+          const lum1 = 0.299 * d1[i] + 0.587 * d1[i + 1] + 0.114 * d1[i + 2];
+          const lum2 = 0.299 * d2[i] + 0.587 * d2[i + 1] + 0.114 * d2[i + 2];
+          const diff = Math.abs(lum1 - lum2);
+          totalDiff += diff;
+          if (diff > 18) diffCount++;
+        }
+        const meanDiff = totalDiff / (totalPixels * 255);
+        const changeRatio = diffCount / totalPixels;
+        return (meanDiff >= 0.024 || changeRatio >= 0.04);
+      }
+
+      const localSlides = [];
+      let isFirst = true;
+
+      for (let i = 0; i < timestamps.length; i++) {
+        const t = timestamps[i];
+        const pct = 5 + Math.round((i / timestamps.length) * 82);
         updateProgress({
-          stage: "uploading",
+          stage: "scanning_slides",
           progress: pct,
-          message: `Uploading ${selectedUploadFile.name} (${Math.round((e.loaded / e.total) * 100)}%)...`
+          message: `Scanning lecture slides in browser... ${Math.round((i / timestamps.length) * 100)}% (${localSlides.length} slides detected)`
+        });
+
+        await new Promise((res) => {
+          video.currentTime = t;
+          video.onseeked = () => res();
+        });
+
+        thumbCtx.drawImage(video, 0, 0, 64, 36);
+
+        if (isFirst || isDifferent(thumbCanvas, lastThumbCanvas)) {
+          lastThumbCtx.drawImage(thumbCanvas, 0, 0, 64, 36);
+          captureCtx.drawImage(video, 0, 0, 1280, 720);
+          const dataUrl = captureCanvas.toDataURL("image/jpeg", 0.75);
+          const m = Math.floor(t / 60);
+          const s = Math.floor(t % 60);
+          const timeStr = `${m}:${s < 10 ? '0' : ''}${s}`;
+          localSlides.push({
+            index: localSlides.length + 1,
+            filename: `slide_${localSlides.length + 1}.jpg`,
+            timestamp_sec: t,
+            timestamp_str: timeStr,
+            title: `Slide ${localSlides.length + 1}`,
+            image_url: dataUrl,
+            data: dataUrl
+          });
+          isFirst = false;
+        }
+      }
+
+      if (localSlides.length === 0) {
+        captureCtx.drawImage(video, 0, 0, 1280, 720);
+        const dataUrl = captureCanvas.toDataURL("image/jpeg", 0.75);
+        localSlides.push({
+          index: 1,
+          filename: "slide_1.jpg",
+          timestamp_sec: 0,
+          timestamp_str: "0:00",
+          title: "Slide 1",
+          image_url: dataUrl,
+          data: dataUrl
         });
       }
-    };
 
-    xhr.onload = function() {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        try {
-          const resp = JSON.parse(xhr.responseText);
-          jobId = resp.job_id;
-          localStorage.setItem("yt2pdf_last_job", jobId);
-          pollErrorCount = 0;
-          updateProgress({
-            stage: "video_uploaded",
-            progress: 30,
-            message: "Upload complete! Scanning video slides..."
-          });
-          pollTimer = setInterval(pollStatus, 2000);
-        } catch(parseErr) {
-          showError("Failed to parse server upload response.");
-          btn.disabled = false;
-        }
-      } else {
-        showError(`Upload failed with status ${xhr.status}: ${xhr.statusText}`);
-        btn.disabled = false;
+      updateProgress({
+        stage: "building_pdf",
+        progress: 92,
+        message: `Compiling ${localSlides.length} slides into PDF directly in your browser...`
+      });
+
+      const cleanName = file.name.replace(/\.[^/.]+$/, "").replace(/[/\\?%*:|"<>]/g, '_').trim();
+      localPdfFilename = `${cleanName}_Slides.pdf`;
+
+      if (typeof ClientPdfBuilder === "undefined" || !ClientPdfBuilder.generatePdfFromJpegList) {
+        throw new Error("ClientPdfBuilder not loaded.");
       }
-    };
 
-    xhr.onerror = function() {
-      showError("Network error during video upload.");
+      localPdfBlob = ClientPdfBuilder.generatePdfFromJpegList(localSlides);
+
+      updateProgress({
+        stage: "completed",
+        progress: 100,
+        message: `✅ Extraction Complete! Detected ${localSlides.length} unique slides.`
+      });
+
+      // Populate slide studio
+      allJobSlides = localSlides;
+      selectedSlideSet = new Set(allJobSlides.map(s => s.filename));
+      renderSlideCards();
+      updateCurationCounts();
+
+      // Show result section
+      document.getElementById("result-section").style.display = "block";
+      document.getElementById("progress-section").style.display = "none";
+      document.getElementById("error-section").style.display = "none";
+
+      const dlBtn = document.getElementById("dl-slides-btn");
+      if (dlBtn) dlBtn.style.display = "inline-flex";
+      const bannerDlBtn = document.getElementById("banner-dl-slides-btn");
+      if (bannerDlBtn) bannerDlBtn.style.display = "inline-flex";
+
+      // Trigger instant automatic download
+      ClientPdfBuilder.downloadPdfBlob(localPdfBlob, localPdfFilename);
+
+    } catch (err) {
+      console.error("[YT2PDF Browser Error]", err);
+      showError(err.message || "Failed to process video file in browser.");
+    } finally {
       btn.disabled = false;
-    };
-
-    xhr.send(formData);
+      URL.revokeObjectURL(videoUrl);
+    }
   }
 
   function handleCompanionIndicatorClick() {
@@ -3471,33 +3573,46 @@
 
   let isDownloadingSlides = false;
   async function downloadSlides() {
-    if (!jobId || isDownloadingSlides) return;
+    if (isDownloadingSlides) return;
     isDownloadingSlides = true;
+
+    // 1. If this was a local in-browser extraction:
+    if (isLocalExtraction && allJobSlides && allJobSlides.length > 0) {
+      try {
+        const selected = allJobSlides.filter(s => selectedSlideSet.has(s.filename));
+        if (selected.length === 0) {
+          alert("Please select at least 1 slide to download.");
+          isDownloadingSlides = false;
+          return;
+        }
+        const pdfBlob = ClientPdfBuilder.generatePdfFromJpegList(selected);
+        ClientPdfBuilder.downloadPdfBlob(pdfBlob, localPdfFilename);
+      } catch (err) {
+        console.error("Local download error:", err);
+      } finally {
+        setTimeout(() => { isDownloadingSlides = false; }, 1500);
+      }
+      return;
+    }
+
+    if (!jobId) {
+      isDownloadingSlides = false;
+      return;
+    }
     const url = getDownloadUrl(`/api/download/${jobId}`);
 
     try {
-      // Primary Strategy: Fetch blob directly to ensure saving with accurate filename
       const res = await apiFetch(`/api/download/${jobId}`);
       if (res.ok) {
         const blob = await res.blob();
         if (blob && blob.size > 200) {
-          const blobUrl = window.URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = blobUrl;
-          a.setAttribute("download", `lecture_slides_${jobId}.pdf`);
-          document.body.appendChild(a);
-          a.click();
-          setTimeout(() => {
-            a.remove();
-            window.URL.revokeObjectURL(blobUrl);
-          }, 2000);
+          ClientPdfBuilder.downloadPdfBlob(blob, `lecture_slides_${jobId}.pdf`);
           return;
         }
       }
       throw new Error("Blob fetch response invalid");
     } catch (err) {
       console.warn("Direct blob download failed, falling back to direct link trigger:", err);
-      // Fallback Strategy: Direct link trigger ONLY if blob fetch failed
       const a = document.createElement("a");
       a.href = url;
       a.setAttribute("download", `lecture_slides_${jobId}.pdf`);
@@ -3508,51 +3623,6 @@
     } finally {
       setTimeout(() => {
         isDownloadingSlides = false;
-      }, 1500);
-    }
-  }
-
-  let isDownloadingGuide = false;
-  async function downloadGuide() {
-    if (!jobId || isDownloadingGuide) return;
-    isDownloadingGuide = true;
-    const guideBtn = document.getElementById("dl-guide-btn");
-    const guideText = document.getElementById("guide-btn-text");
-    const guideSub = document.getElementById("guide-btn-sub");
-    const origText = guideText ? guideText.textContent : "Download Study Guide";
-    const origSub = guideSub ? guideSub.textContent : "Full Academic Chapter (PDF)";
-
-    if (guideText) guideText.textContent = "Generating Study Guide...";
-    if (guideSub) guideSub.textContent = "AI synthesizing chapter from slides...";
-
-    try {
-      const res = await apiFetch(`/api/download/${jobId}/guide`);
-      if (res.ok) {
-        const blob = await res.blob();
-        if (blob && blob.size > 200) {
-          const blobUrl = window.URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = blobUrl;
-          a.setAttribute("download", `study_guide_${jobId}.pdf`);
-          document.body.appendChild(a);
-          a.click();
-          setTimeout(() => {
-            a.remove();
-            window.URL.revokeObjectURL(blobUrl);
-          }, 2000);
-          showToast("Study guide downloaded successfully!");
-          return;
-        }
-      }
-      showToast("Study guide is not available for this video.");
-    } catch (err) {
-      console.warn("Guide download notice:", err);
-      showToast("Could not download study guide. Please try again.");
-    } finally {
-      if (guideText) guideText.textContent = origText;
-      if (guideSub) guideSub.textContent = origSub;
-      setTimeout(() => {
-        isDownloadingGuide = false;
       }, 1500);
     }
   }
@@ -3707,7 +3777,7 @@
   }
 
   async function rebuildSlides() {
-    if (!jobId || selectedSlideSet.size === 0) return;
+    if (selectedSlideSet.size === 0) return;
     const btn = document.getElementById("rebuild-btn");
     const txt = document.getElementById("rebuild-text");
     const msg = document.getElementById("curation-msg");
@@ -3715,6 +3785,39 @@
 
     btn.disabled = true;
     txt.textContent = "Compiling PDF...";
+
+    if (isLocalExtraction) {
+      try {
+        const filtered = allJobSlides.filter(s => selectedSlideSet.has(s.filename));
+        localPdfBlob = ClientPdfBuilder.generatePdfFromJpegList(filtered);
+
+        msg.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:5px;"><polyline points="20 6 9 17 4 12"></polyline></svg>Slides PDF compiled (${filtered.length} slides)!`;
+        msg.style.display = "inline-flex";
+        msg.style.alignItems = "center";
+
+        if (dlBtn) {
+          dlBtn.style.display = "inline-flex";
+          dlBtn.innerHTML = `<span>Download Slides PDF (${filtered.length})</span>`;
+        }
+
+        ClientPdfBuilder.downloadPdfBlob(localPdfBlob, localPdfFilename || "Lecture_Slides.pdf");
+
+        setTimeout(() => {
+          msg.style.display = "none";
+        }, 6000);
+      } catch (err) {
+        alert("Error compiling slides PDF in browser: " + err.message);
+      } finally {
+        btn.disabled = false;
+        updateCurationCounts();
+      }
+      return;
+    }
+
+    if (!jobId) {
+      btn.disabled = false;
+      return;
+    }
 
     try {
       const res = await apiFetch(`/api/rebuild_slides_pdf/${jobId}`, {
@@ -3817,8 +3920,6 @@
     }
   });
 
-  let studyGuidePollTimer = null;
-
   function showResult(data, outputs) {
     document.getElementById("result-section").style.display = "block";
     document.getElementById("progress-section").style.display = "none";
@@ -3828,54 +3929,6 @@
     if (dlBtn) dlBtn.style.display = "inline-flex";
     const bannerDlBtn = document.getElementById("banner-dl-slides-btn");
     if (bannerDlBtn) bannerDlBtn.style.display = "inline-flex";
-
-    const guideBtn = document.getElementById("dl-guide-btn");
-    const guideText = document.getElementById("dl-guide-text");
-    const guideSub = document.getElementById("dl-guide-sub");
-
-    function updateGuideUI(ready) {
-      if (!guideBtn) return;
-      if (ready) {
-        guideBtn.disabled = false;
-        guideBtn.style.opacity = "1";
-        guideBtn.style.cursor = "pointer";
-        if (guideText) guideText.textContent = "Download Study Guide";
-        if (guideSub) guideSub.textContent = "Full Academic Chapter (PDF)";
-      } else {
-        guideBtn.disabled = true;
-        guideBtn.style.opacity = "0.7";
-        guideBtn.style.cursor = "wait";
-        if (guideText) guideText.textContent = "Synthesizing Study Guide...";
-        if (guideSub) guideSub.textContent = "AI generating textbook chapter...";
-      }
-    }
-
-    if (outputs && outputs.study_guide_pdf) {
-      updateGuideUI(true);
-    } else {
-      updateGuideUI(false);
-      if (studyGuidePollTimer) clearInterval(studyGuidePollTimer);
-      let pollAttempts = 0;
-      studyGuidePollTimer = setInterval(async () => {
-        pollAttempts++;
-        if (pollAttempts > 30) {
-          clearInterval(studyGuidePollTimer);
-          // Unlock button so clicking triggers on-the-fly server compilation if not yet compiled
-          updateGuideUI(true);
-          return;
-        }
-        try {
-          const res = await apiFetch(`/api/outputs/${jobId}`);
-          if (res.ok) {
-            const outData = await res.json();
-            if (outData && outData.study_guide_pdf) {
-              clearInterval(studyGuidePollTimer);
-              updateGuideUI(true);
-            }
-          }
-        } catch (e) {}
-      }, 2500);
-    }
 
     loadSlidePreview(jobId);
 

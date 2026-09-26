@@ -501,114 +501,8 @@ async def download_slides_pdf(job_id: str):
 
 @app.api_route("/api/download/{job_id}/guide", methods=["GET", "HEAD"])
 async def download_guide_pdf(job_id: str):
-    """Download the AI comprehensive study guide PDF with on-the-fly compilation resilience."""
-    import json
-    job_dir = JOBS_ROOT / job_id
-    pdf_path = job_dir / "study_guide.pdf"
-
-    # On-the-fly compilation if PDF is missing or under 500 bytes
-    if not pdf_path.exists() or pdf_path.stat().st_size < 500:
-        md_path = job_dir / "study_guide.md"
-        meta_file = job_dir / "meta.json"
-        video_title = "Lecture Study Guide"
-        duration = 0.0
-        if meta_file.exists():
-            try:
-                mdata = json.loads(meta_file.read_text())
-                video_title = mdata.get("title") or mdata.get("video_title") or video_title
-                duration = float(mdata.get("duration") or 0.0)
-            except Exception:
-                pass
-
-        guide_md = ""
-        if md_path.exists():
-            guide_md = md_path.read_text(encoding="utf-8")
-
-        # If markdown is missing, synthesize on-the-fly using available slides and transcript
-        if not guide_md or len(guide_md.strip()) < 300:
-            slides_dir = job_dir / "slides"
-            slide_imgs = sorted(list(slides_dir.glob("*.png")) + list(slides_dir.glob("*.jpg"))) if slides_dir.exists() else []
-            tr_file = job_dir / "transcript.json"
-            tr_data = []
-            if tr_file.exists():
-                try:
-                    tr_data = json.loads(tr_file.read_text())
-                except Exception:
-                    pass
-
-            audio_cand = None
-            for aname in ["audio.mp4", "audio.webm", "audio.mp3", "audio.m4a"]:
-                ap = job_dir / aname
-                if ap.exists() and ap.stat().st_size > 8000:
-                    audio_cand = ap
-                    break
-
-            if slide_imgs or tr_data or audio_cand:
-                log.info("[%s] Synthesizing study guide on-the-fly for download request...", job_id)
-                try:
-                    from study_guide_service import generate_study_guide
-                    guide_md = generate_study_guide(
-                        slide_images=slide_imgs,
-                        transcript_segments=tr_data,
-                        audio_path=audio_cand,
-                        video_title=video_title,
-                        total_duration=duration,
-                        gemini_api_key=GEMINI_API_KEY,
-                    )
-                    if guide_md and len(guide_md.strip()) >= 300:
-                        md_path.write_text(guide_md, encoding="utf-8")
-                except Exception as synth_err:
-                    log.warning("[%s] On-the-fly study guide synthesis notice: %s", job_id, synth_err)
-
-        from pdf_study_guide_compiler import compile_markdown_to_pdf, _compile_fpdf_fallback, is_valid_study_guide_markdown
-        if is_valid_study_guide_markdown(guide_md):
-            compiled = compile_markdown_to_pdf(
-                markdown_content=guide_md,
-                output_path=pdf_path,
-                video_title=video_title,
-                total_duration=duration,
-            )
-            if not compiled or not pdf_path.exists() or pdf_path.stat().st_size < 500:
-                _compile_fpdf_fallback(guide_md, pdf_path, video_title)
-
-            # Update outputs.json so future requests know study guide is ready
-            if pdf_path.exists() and pdf_path.stat().st_size >= 500:
-                try:
-                    outs_f = job_dir / "outputs.json"
-                    outs_data = json.loads(outs_f.read_text()) if outs_f.exists() else {}
-                    outs_data["study_guide_pdf"] = True
-                    outs_f.write_text(json.dumps(outs_data))
-                except Exception:
-                    pass
-
-    if not pdf_path.exists() or pdf_path.stat().st_size < 500:
-        raise HTTPException(status_code=404, detail="Study guide PDF not ready yet or job not found.")
-
-    meta_file = JOBS_ROOT / job_id / "meta.json"
-    filename = "study_guide.pdf"
-    if meta_file.exists():
-        try:
-            mdata = json.loads(meta_file.read_text())
-            t = mdata.get("title") or mdata.get("video_title")
-            if t:
-                import re
-                clean = re.sub(r'[\\/*?:"<>|]', "", t).strip()
-                clean = clean.replace(" ", "_")
-                filename = f"{clean[:50]}_study_guide.pdf"
-        except Exception:
-            pass
-
-    return FileResponse(
-        path=str(pdf_path),
-        filename=filename,
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Expose-Headers": "Content-Disposition",
-            "Cache-Control": "no-cache",
-        },
-    )
+    """Decommissioned endpoint."""
+    raise HTTPException(status_code=404, detail="Study guide feature has been decommissioned.")
 
 
 @app.get("/api/outputs/{job_id}")
@@ -617,7 +511,6 @@ async def get_outputs(job_id: str):
     import json
     slides_dir = JOBS_ROOT / job_id / "slides"
     has_slides = slides_dir.exists() and any(slides_dir.glob("slide_*.png"))
-    has_guide_pdf = (JOBS_ROOT / job_id / "study_guide.pdf").exists() and (JOBS_ROOT / job_id / "study_guide.pdf").stat().st_size > 500
 
     outputs_file = JOBS_ROOT / job_id / "outputs.json"
     if outputs_file.exists():
@@ -625,7 +518,7 @@ async def get_outputs(job_id: str):
             data = json.loads(outputs_file.read_text())
             if has_slides:
                 data["slides_pdf"] = True
-            data["study_guide_pdf"] = has_guide_pdf or bool(data.get("study_guide_pdf"))
+            data["study_guide_pdf"] = False
             return JSONResponse(content=data)
         except Exception:
             pass
@@ -635,7 +528,7 @@ async def get_outputs(job_id: str):
     slide_count = len(list(slides_dir.glob("slide_*.png"))) if slides_dir.exists() else 0
     return JSONResponse(content={
         "slides_pdf": has_slides_pdf,
-        "study_guide_pdf": has_guide_pdf,
+        "study_guide_pdf": False,
         "slide_count": slide_count,
     })
 
@@ -724,12 +617,11 @@ async def rebuild_slides_pdf(job_id: str, req: RebuildSlidesRequest):
         include_cover=True,
     )
 
-    # Update outputs.json with new slide count while preserving study guide status
-    has_guide_pdf = (JOBS_ROOT / job_id / "study_guide.pdf").exists() and (JOBS_ROOT / job_id / "study_guide.pdf").stat().st_size > 500
+    # Update outputs.json with new slide count
     outputs_file = JOBS_ROOT / job_id / "outputs.json"
     outputs_file.write_text(json.dumps({
         "slides_pdf": True,
-        "study_guide_pdf": has_guide_pdf,
+        "study_guide_pdf": False,
         "slide_count": len(valid_paths),
     }))
 
