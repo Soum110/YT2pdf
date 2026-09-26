@@ -17,13 +17,12 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-import aiofiles
-from typing import Any, Dict, List, Optional
-from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Query, Request, Response, UploadFile
+from typing import List, Optional
+from fastapi import FastAPI, File, HTTPException, Query, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 # ─────────────────────────────────────────────

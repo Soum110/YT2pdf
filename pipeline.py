@@ -46,6 +46,44 @@ def _write_status(job_dir: Path, stage: str, progress: int, message: str,
     (job_dir / "status.json").write_text(json.dumps(status))
 
 
+def _is_valid_audio_file(file_path: Union[str, Path, None]) -> bool:
+    """Validates that a file is a non-empty audio container, filtering out HTML error pages."""
+    if not file_path:
+        return False
+    p = Path(file_path)
+    if not p.exists() or p.stat().st_size < 8000:
+        return False
+    try:
+        with open(p, "rb") as f:
+            header = f.read(64)
+        if not header:
+            return False
+        # Reject HTML / XML error pages from CDN 403 blocks
+        if header.startswith(b"<") or b"<!DOCTYPE" in header or b"<html" in header.lower():
+            return False
+        # MP4 / M4A (ftyp box in first 24 bytes)
+        if b"ftyp" in header[:24]:
+            return True
+        # WebM / MKV (EBML ID \x1a\x45\xdf\xa3)
+        if header.startswith(b"\x1a\x45\xdf\xa3"):
+            return True
+        # MP3 (ID3 header or frame sync 0xFF 0xE0)
+        if header.startswith(b"ID3") or (len(header) >= 2 and header[0] == 0xFF and (header[1] & 0xE0) == 0xE0):
+            return True
+        # WAV (RIFF header)
+        if header.startswith(b"RIFF") and b"WAVE" in header[:16]:
+            return True
+        # OGG
+        if header.startswith(b"OggS"):
+            return True
+        # AAC (ADTS frame sync)
+        if len(header) >= 2 and header[0] == 0xFF and (header[1] & 0xF6) == 0xF0:
+            return True
+    except Exception:
+        return False
+    return False
+
+
 # ─────────────────────────────────────────────
 # yt-dlp helpers
 # ─────────────────────────────────────────────
@@ -511,8 +549,7 @@ def run_pipeline(job_id: str, video_url: str, jobs_root: Path, gemini_api_key: s
         log.info("[%s] Downloaded to: %s", job_id, video_path)
         _write_status(job_dir, "downloading", 42, "Download complete. Starting analysis...")
 
-        # ── Step 3: CV Pass (OpenCV SSIM) ─────────────────────────────────
-        from slide_extractor import ExtractorConfig, pass1_find_candidates, save_candidates_debug
+        from slide_extractor import ExtractorConfig, pass1_find_candidates
 
         # Adapt sample_fps for long videos so CV scanning completes swiftly without excessive memory
         sample_fps = 1.0
@@ -858,17 +895,23 @@ def run_pipeline_from_frames(
         # Handle Audio Track (decoded base64, server fetch from audio_url, or uploaded file)
         audio_file_candidate = None
         for cand_name in ["audio.mp4", "audio.webm", "audio.mp3", "audio.m4a"]:
-            if (job_dir / cand_name).exists() and (job_dir / cand_name).stat().st_size > 1000:
-                audio_file_candidate = job_dir / cand_name
+            cand_p = job_dir / cand_name
+            if cand_p.exists() and _is_valid_audio_file(cand_p):
+                audio_file_candidate = cand_p
                 break
 
         if not audio_file_candidate and audio_data:
             try:
                 audio_ext = ".webm" if "webm" in (audio_mime or "") else ".mp4"
-                audio_file_candidate = job_dir / f"audio{audio_ext}"
+                temp_dec = job_dir / f"audio_decoded{audio_ext}"
                 b64_aud = audio_data.split(",", 1)[1] if "," in audio_data else audio_data
-                audio_file_candidate.write_bytes(base64.b64decode(b64_aud))
-                log.info("[%s] Decoded audio_data (%d bytes)", job_id, audio_file_candidate.stat().st_size)
+                temp_dec.write_bytes(base64.b64decode(b64_aud))
+                if _is_valid_audio_file(temp_dec):
+                    audio_file_candidate = temp_dec
+                    log.info("[%s] Decoded valid audio_data (%d bytes)", job_id, audio_file_candidate.stat().st_size)
+                else:
+                    log.warning("[%s] Decoded audio_data failed validation, discarding.", job_id)
+                    temp_dec.unlink(missing_ok=True)
             except Exception as aud_dec_err:
                 log.warning("[%s] Failed to decode audio_data: %s", job_id, aud_dec_err)
                 audio_file_candidate = None
@@ -888,9 +931,13 @@ def run_pipeline_from_frames(
                         written += len(chunk)
                         if written > 25 * 1024 * 1024:
                             break
-                if temp_aud.stat().st_size > 1000:
+                if _is_valid_audio_file(temp_aud):
                     audio_file_candidate = temp_aud
-                    log.info("[%s] Downloaded audio track (%d bytes)", job_id, audio_file_candidate.stat().st_size)
+                    log.info("[%s] Downloaded valid audio track (%d bytes)", job_id, audio_file_candidate.stat().st_size)
+                else:
+                    log.warning("[%s] audio_url stream is invalid or blocked (size %d bytes), ignoring.",
+                                job_id, temp_aud.stat().st_size if temp_aud.exists() else 0)
+                    temp_aud.unlink(missing_ok=True)
             except Exception as aud_dl_err:
                 log.debug("[%s] audio_url server fetch notice: %s", job_id, aud_dl_err)
 

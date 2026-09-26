@@ -107,7 +107,7 @@ Follow these exact steps to publish the extension to the official Google Chrome 
 ### Step 2: Upload the Extension ZIP
 1. In the top-right corner, click **"New Item"** (or **"Add new item"**).
 2. Drag and drop the ready-made package file:
-   📁 **`yt2pdf-slide-companion-v1.0.0.zip`** (located in the root of this project: `/Users/soumensen/Documents/YT2pdf/yt2pdf-slide-companion-v1.0.0.zip`).
+   📁 **`static/yt2pdf-extension.zip`** (the ready-to-publish extension package in the `static/` directory).
 3. The dashboard will validate the manifest and open the store listing editor.
 
 ### Step 3: Fill Out Store Listing

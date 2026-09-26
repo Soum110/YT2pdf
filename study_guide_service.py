@@ -7,13 +7,12 @@ Processes:
   3. Audio track (audio file)
 """
 
-import base64
 import logging
 import os
 import re
 import time
 from pathlib import Path
-from typing import Any, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import cv2
 from google import genai
@@ -38,11 +37,8 @@ Organize the study guide chronologically or thematically based on the lecture fl
 6. Key Takeaways & Review Questions: Provide 2-3 critical summary bullets and 2 self-test questions.
 
 Execution Directives:
-
 Err on the side of giving too much detail. Leave no slide unexplained.
-
 Use bolding, bulleted, and numbered lists extensively for readability.
-
 Bridge the gaps between sparse slide text and the rich transcript audio."""
 
 
@@ -78,6 +74,44 @@ def _format_transcript_text(transcript_segments: Any) -> str:
     return "\n".join(lines)
 
 
+def _is_valid_audio_file(file_path: Union[str, Path, None]) -> bool:
+    """Validates that a file is a non-empty audio container, filtering out HTML error pages."""
+    if not file_path:
+        return False
+    p = Path(file_path)
+    if not p.exists() or p.stat().st_size < 8000:
+        return False
+    try:
+        with open(p, "rb") as f:
+            header = f.read(64)
+        if not header:
+            return False
+        # Reject HTML / XML error pages from CDN 403 blocks
+        if header.startswith(b"<") or b"<!DOCTYPE" in header or b"<html" in header.lower():
+            return False
+        # MP4 / M4A (ftyp box in first 24 bytes)
+        if b"ftyp" in header[:24]:
+            return True
+        # WebM / MKV (EBML ID \x1a\x45\xdf\xa3)
+        if header.startswith(b"\x1a\x45\xdf\xa3"):
+            return True
+        # MP3 (ID3 header or frame sync 0xFF 0xE0)
+        if header.startswith(b"ID3") or (len(header) >= 2 and header[0] == 0xFF and (header[1] & 0xE0) == 0xE0):
+            return True
+        # WAV (RIFF header)
+        if header.startswith(b"RIFF") and b"WAVE" in header[:16]:
+            return True
+        # OGG
+        if header.startswith(b"OggS"):
+            return True
+        # AAC (ADTS frame sync)
+        if len(header) >= 2 and header[0] == 0xFF and (header[1] & 0xF6) == 0xF0:
+            return True
+    except Exception:
+        return False
+    return False
+
+
 def _clean_title(title: str) -> str:
     cleaned = re.sub(r'^(?:\d+[\.\-\s]+|lecture\s*\d+[:\-]?\s*|part\s*\d+[:\-]?\s*|ch(?:apter)?\s*\d+[:\-]?\s*)', '', title, flags=re.IGNORECASE)
     cleaned = re.sub(r'\s*[\-|\|]\s*(?:Gate\s*Smashers|NPTEL|Khan\s*Academy|freeCodeCamp|MIT|Stanford|Coursera|edX).*$', '', cleaned, flags=re.IGNORECASE)
@@ -98,11 +132,12 @@ def generate_study_guide(
     Returns structured markdown conforming to the educational 6-section structure.
     """
     clean_topic = _clean_title(video_title)
+    has_valid_audio = _is_valid_audio_file(audio_path)
     log.info("Generating multimodal study guide for '%s' (%d slides, audio=%s)...",
-             clean_topic, len(slide_images), bool(audio_path))
+             clean_topic, len(slide_images), has_valid_audio)
 
     if not gemini_api_key or gemini_api_key == "YOUR_GEMINI_API_KEY_HERE":
-        log.warning("No Gemini API key supplied; compiling deterministic study guide markdown.")
+        log.warning("No Gemini API key supplied; compiling intelligent transcript study guide markdown.")
         return _generate_deterministic_markdown(
             video_title=clean_topic,
             transcript_segments=transcript_segments,
@@ -110,41 +145,11 @@ def generate_study_guide(
         )
 
     client = genai.Client(api_key=gemini_api_key)
-    content_parts: List[types.Part] = []
     audio_upload_obj = None
 
     try:
-        # 1. Attach Audio Track
-        if audio_path and os.path.exists(audio_path):
-            audio_p = Path(audio_path)
-            file_size_mb = audio_p.stat().st_size / (1024 * 1024)
-            mime_type = "audio/mp3" if audio_p.suffix.lower() == ".mp3" else "audio/mp4"
-
-            if file_size_mb <= 18.0:
-                log.info("Attaching inline audio track (%.1f MB, %s)...", file_size_mb, mime_type)
-                audio_bytes = audio_p.read_bytes()
-                content_parts.append(types.Part(
-                    inline_data=types.Blob(mime_type=mime_type, data=audio_bytes)
-                ))
-            else:
-                log.info("Uploading audio file to Gemini Files API (%.1f MB)...", file_size_mb)
-                audio_upload_obj = client.files.upload(file=str(audio_p))
-                poll_start = time.time()
-                while time.time() - poll_start < 90:
-                    status_obj = client.files.get(name=audio_upload_obj.name)
-                    state = getattr(getattr(status_obj, "state", None), "name", str(getattr(status_obj, "state", "")))
-                    log.info("Gemini Files API audio state: %s", state)
-                    if state == "ACTIVE":
-                        break
-                    elif state == "FAILED":
-                        log.warning("Gemini file upload failed: %s", status_obj)
-                        audio_upload_obj = None
-                        break
-                    time.sleep(2.0)
-                if audio_upload_obj:
-                    content_parts.append(audio_upload_obj)
-
-        # 2. Attach Key Slide Images
+        # 1. Attach Key Slide Images
+        slide_parts: List[types.Part] = []
         stride = max(1, len(slide_images) // 12) if len(slide_images) > 12 else 1
         sampled_slides = slide_images[::stride][:16]
         log.info("Attaching %d representative slide images...", len(sampled_slides))
@@ -159,25 +164,61 @@ def generate_study_guide(
                         resized = cv2.resize(img_cv, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
                         success, enc = cv2.imencode(".jpg", resized, [cv2.IMWRITE_JPEG_QUALITY, 85])
                         if success:
-                            content_parts.append(types.Part(
-                                inline_data=types.Blob(mime_type="image/jpeg", data=enc.tobytes())
+                            slide_parts.append(types.Part.from_bytes(
+                                data=enc.tobytes(),
+                                mime_type="image/jpeg"
                             ))
                 except Exception as img_err:
                     log.debug("Slide image attach skipped for %s: %s", p.name, img_err)
 
-        # 3. Add Transcript & User Prompt
+        # 2. Add Transcript & User Prompt
         transcript_text = _format_transcript_text(transcript_segments)
         user_prompt = f"# Lecture Study Guide Request: {clean_topic}\n"
         user_prompt += f"Duration: {int(total_duration // 60)}m {int(total_duration % 60)}s\n"
         user_prompt += f"Visual Slide Images Provided: {len(sampled_slides)}\n"
-        if audio_path and os.path.exists(audio_path):
+        if has_valid_audio:
             user_prompt += "Audio Track Attached: Yes (listen carefully to explanations, definitions, examples)\n"
         if transcript_text:
-            # Pass up to 65,000 characters of timestamped transcript
             user_prompt += f"\n## Spoken Lecture Transcript:\n{transcript_text[:65000]}\n"
 
         user_prompt += "\nPlease teach all concepts comprehensively in detailed markdown following the exact 6-part structure specified in the system instructions."
-        content_parts.append(types.Part(text=user_prompt))
+        prompt_part = types.Part.from_text(text=user_prompt)
+
+        # Core parts without audio (reliable baseline)
+        parts_no_audio = list(slide_parts) + [prompt_part]
+
+        # 3. Attach Audio Track if verified valid
+        audio_part: Optional[types.Part] = None
+        if has_valid_audio:
+            try:
+                audio_p = Path(audio_path)
+                file_size_mb = audio_p.stat().st_size / (1024 * 1024)
+                mime_type = "audio/mp3" if audio_p.suffix.lower() == ".mp3" else "audio/mp4"
+
+                if file_size_mb <= 18.0:
+                    log.info("Attaching inline audio track (%.1f MB, %s)...", file_size_mb, mime_type)
+                    audio_bytes = audio_p.read_bytes()
+                    audio_part = types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)
+                else:
+                    log.info("Uploading audio file to Gemini Files API (%.1f MB)...", file_size_mb)
+                    audio_upload_obj = client.files.upload(file=str(audio_p))
+                    poll_start = time.time()
+                    while time.time() - poll_start < 90:
+                        status_obj = client.files.get(name=audio_upload_obj.name)
+                        state = getattr(getattr(status_obj, "state", None), "name", str(getattr(status_obj, "state", "")))
+                        if state == "ACTIVE":
+                            audio_part = types.Part.from_uri(file_uri=audio_upload_obj.uri, mime_type=audio_upload_obj.mime_type)
+                            break
+                        elif state == "FAILED":
+                            log.warning("Gemini file upload failed: %s", status_obj)
+                            audio_upload_obj = None
+                            break
+                        time.sleep(2.0)
+            except Exception as aud_prep_err:
+                log.warning("Audio preparation notice: %s", aud_prep_err)
+                audio_part = None
+
+        content_parts = ([audio_part] if audio_part else []) + parts_no_audio
 
         # 4. Generate Content via Gemini API
         candidate_models = [model_name, "gemini-2.0-flash", "gemini-1.5-flash"]
@@ -198,16 +239,11 @@ def generate_study_guide(
                     return response.text.strip()
             except Exception as gen_err:
                 log.warning("Model %s generation failed: %s", cand_model, gen_err)
-                time.sleep(1.0)
+                time.sleep(0.5)
 
-        # 4b. If multimodal call failed and audio was included, retry with slides + transcript only
-        if audio_path or audio_upload_obj:
+        # 4b. If multimodal call with audio failed, retry with slides + transcript only
+        if audio_part:
             log.info("Retrying Gemini generation with slides + transcript (excluding audio payload)...")
-            parts_no_audio = [
-                p for p in content_parts
-                if not (isinstance(p, types.Part) and getattr(p, "inline_data", None) and "audio" in getattr(p.inline_data, "mime_type", ""))
-                and p != audio_upload_obj
-            ]
             for cand_model in ["gemini-2.0-flash", "gemini-1.5-flash"]:
                 try:
                     response = client.models.generate_content(
@@ -233,7 +269,7 @@ def generate_study_guide(
             except Exception:
                 pass
 
-    log.warning("Gemini API calls exhausted or failed; falling back to deterministic study guide.")
+    log.warning("Gemini API calls exhausted or failed; compiling intelligent transcript study guide.")
     return _generate_deterministic_markdown(
         video_title=clean_topic,
         transcript_segments=transcript_segments,
@@ -242,116 +278,131 @@ def generate_study_guide(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Deterministic Fallback Generator (Conforms to the exact 6-part structure)
+# Intelligent Transcript-Driven Fallback Generator
+# (Conforms strictly to the 6-part pedagogy using ACTUAL lecture statements)
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _build_modules_from_transcript(clean_topic: str, segments: Any) -> Optional[List[Dict[str, Any]]]:
+    """Extracts authentic lecture topics and sentences directly from spoken transcript."""
+    items: List[Tuple[float, str]] = []
+    if isinstance(segments, list):
+        for s in segments:
+            if isinstance(s, dict) and s.get("text"):
+                items.append((float(s.get("start", 0.0)), s["text"].strip()))
+            elif isinstance(s, (list, tuple)) and len(s) >= 3 and str(s[2]).strip():
+                items.append((float(s[0]), str(s[2]).strip()))
+            elif hasattr(s, "text") and hasattr(s, "start") and str(s.text).strip():
+                items.append((float(s.start), str(s.text).strip()))
+
+    if not items:
+        return None
+
+    # Partition into up to 3 cohesive chronological lecture modules
+    n = len(items)
+    chunk_size = max(1, n // 3)
+    chunks = [items[i:i + chunk_size] for i in range(0, n, chunk_size)][:3]
+
+    section_titles = [
+        f"Overview, Background & Foundational Context of {clean_topic}",
+        f"Core Analysis, Mechanisms & Primary Dynamics",
+        f"Strategic Implications, Outcomes & Future Outlook"
+    ]
+
+    modules = []
+    for idx, chunk in enumerate(chunks):
+        title = section_titles[idx] if idx < len(section_titles) else f"Key Dynamics of {clean_topic} (Part {idx+1})"
+        texts = [t for _, t in chunk]
+        start_m, start_s = int(chunk[0][0] // 60), int(chunk[0][0] % 60)
+        end_m, end_s = int(chunk[-1][0] // 60), int(chunk[-1][0] % 60)
+
+        # Plain english breakdown from actual opening statements
+        plain_english = (
+            f"In this segment of the lecture ([{start_m:02d}:{start_s:02d} - {end_m:02d}:{end_s:02d}]), "
+            f"the speaker explains: \"{texts[0]}\" "
+        )
+        if len(texts) > 1:
+            plain_english += f"The core intuition presented is that {texts[1]}"
+
+        # Formal definition highlighting key subject terms
+        formal_def = (
+            f"Within this topic, **{clean_topic}** examines key domain concepts: "
+            f"\"{texts[0]}\""
+        )
+        if len(texts) > 2:
+            formal_def += f"\n\nKey academic definitions and metrics analyzed: {texts[2]}"
+
+        # Deep dive with real timestamped points
+        deep_dive_points = [
+            f"- **[{int(sec // 60):02d}:{int(sec % 60):02d}]**: {txt}"
+            for sec, txt in chunk[:6]
+        ]
+
+        # Nuances from the discussion
+        nuances_list = [
+            f"- Contextual dependencies and boundary constraints discussed during [{start_m:02d}:{start_s:02d} - {end_m:02d}:{end_s:02d}].",
+            f"- Crucial distinction between casual assumptions and the empirical factors highlighted by the instructor."
+        ]
+        if len(texts) > 3:
+            nuances_list.append(f"- Speaker observation: \"{texts[3]}\"")
+
+        # Takeaways
+        takeaways = [t for t in texts[:3]]
+
+        # Review questions derived from actual discussion
+        q1 = f"How does the instructor explain: \"{texts[0]}\"?"
+        q2 = f"What primary consequences or mechanisms are highlighted between [{start_m:02d}:{start_s:02d}] and [{end_m:02d}:{end_s:02d}]?"
+
+        modules.append({
+            "topic": title,
+            "plain_english": plain_english,
+            "formal_definition": formal_def,
+            "deep_dive": "\n".join(deep_dive_points),
+            "nuances": "\n".join(nuances_list),
+            "takeaways": takeaways,
+            "questions": [q1, q2]
+        })
+
+    return modules
+
 
 def _generate_deterministic_markdown(
     video_title: str,
     transcript_segments: Any = None,
     total_duration: float = 0.0,
 ) -> str:
-    """Fallback generator strictly implementing the user's required 6-part structure."""
+    """Fallback generator strictly implementing the user's required 6-part structure using REAL content."""
     clean_topic = _clean_title(video_title)
-    transcript_text = _format_transcript_text(transcript_segments)
-    is_automata = any(k in clean_topic.lower() for k in ["automata", "state machine", "fsm", "dfa", "nfa", "theory of computation", "toc"])
+    modules = _build_modules_from_transcript(clean_topic, transcript_segments)
 
-    if is_automata:
+    if not modules:
+        # Honest fallback without transcript — strictly zero fake jargon
         modules = [
             {
-                "topic": f"Foundations of {clean_topic} & Formal 5-Tuple",
+                "topic": f"Comprehensive Overview & Core Foundations of {clean_topic}",
                 "plain_english": (
-                    "Imagine a simple vending machine or a turnstile. It doesn't have an entire computer hard drive; "
-                    "instead, it remembers only which condition it is currently in (e.g., 'Locked' or 'Unlocked'). "
-                    "When you insert a coin, it changes its condition. That is precisely what a Finite Automaton is: "
-                    "a mathematical machine with a strictly limited set of states that transitions between them as it reads input symbols."
+                    f"This study guide covers the core concepts, principles, and practical dynamics of {clean_topic}. "
+                    "Mastering this topic requires understanding the underlying mechanics, practical constraints, and real-world implications."
                 ),
                 "formal_definition": (
-                    "A **Deterministic Finite Automaton (DFA)** is formally defined as a 5-tuple:\n\n"
-                    "$$M = (Q, \\Sigma, \\delta, q_0, F)$$\n\n"
-                    "- $Q$: A finite, non-empty set of internal states.\n"
-                    "- $\\Sigma$: A finite, non-empty set of input symbols (the alphabet).\n"
-                    "- $\\delta$: The transition function mapping $\\delta: Q \\times \\Sigma \\to Q$.\n"
-                    "- $q_0 \\in Q$: The unique initial or starting state.\n"
-                    "- $F \\subseteq Q$: The set of final or accepting states."
+                    f"**{clean_topic}** refers to the comprehensive subject matter presented in this lecture. "
+                    "Review each visual slide carefully alongside key definitions and problem formulations."
                 ),
                 "deep_dive": (
-                    "- **State Transitions**: At each clock cycle or step, the automaton reads the next symbol from the input stream.\n"
-                    "- **Memorylessness**: The machine has no auxiliary storage (no stack, tape, or heap). Its entire historical memory is summarized by its current state $q \\in Q$.\n"
-                    "- **Language Acceptance**: An input string $w \\in \\Sigma^*$ is accepted if processing $w$ starting from $q_0$ terminates in any state belonging to $F$."
+                    f"- **Foundations**: The instructor introduces the core principles and context of {clean_topic}.\n"
+                    f"- **Analysis**: The lecture systematically explores key mechanisms, components, and workflows.\n"
+                    f"- **Application**: Real-world examples and case dynamics demonstrate practical execution."
                 ),
                 "nuances": (
-                    "- **Completeness Requirement**: In a DFA, every single state must have exactly one defined transition for every symbol in $\\Sigma$. Missing transitions must lead to a designated Dead/Trap state.\n"
-                    "- **Misconception**: Having multiple final states does not mean the machine accepts multiple times; it simply means there are multiple conditions under which the string is considered valid."
+                    "- Pay close attention to underlying assumptions and prerequisite definitions.\n"
+                    "- Note distinctions between theoretical models and real-world implementations."
                 ),
                 "takeaways": [
-                    "A Finite State Machine processes strings strictly sequentially with zero auxiliary memory.",
-                    "The formal 5-tuple $(Q, \\Sigma, \\delta, q_0, F)$ uniquely and completely specifies the machine's behavior."
+                    f"Foundational concepts of {clean_topic} form the prerequisite for advanced analysis.",
+                    "Verify all system assumptions and constraints before practical execution."
                 ],
                 "questions": [
-                    "What happens if an input string ends while the DFA is in a non-accepting state?",
-                    "Why must the state set $Q$ and alphabet $\\Sigma$ be strictly finite?"
-                ]
-            },
-            {
-                "topic": "State Diagrams, Transition Tables & Operational Mechanics",
-                "plain_english": (
-                    "To build or program a state machine, we can draw it like a subway map. Each station is a state, "
-                    "and the tracks between stations are transitions labeled with what input ticket is needed. "
-                    "Alternatively, we can write it down as a spreadsheet table showing: 'If you are here and see this, go there'."
-                ),
-                "formal_definition": (
-                    "The **Transition Table** is a 2D matrix representation of the transition function $\\delta$. "
-                    "The rows correspond to states $q_i \\in Q$, columns correspond to alphabet symbols $a_j \\in \\Sigma$, "
-                    "and each entry contains $\\delta(q_i, a_j) = q_k$."
-                ),
-                "deep_dive": (
-                    "- **State Diagram Conventions**: States are drawn as circles; the initial state is marked with an incoming unlabelled arrow; accepting states are drawn with double concentric circles.\n"
-                    "- **Transition Function Execution**: For any string $w = a_1 a_2 \\dots a_n$, the extended transition function $\\hat{\\delta}$ is computed recursively as $\\hat{\\delta}(q, a w') = \\hat{\\delta}(\\delta(q, a), w')$.\n"
-                    "- **Dead State Construction**: If an invalid prefix is encountered, the transition routes to an absorbing trap state from which no final state can be reached."
-                ),
-                "nuances": (
-                    "- Never omit transitions for any alphabet symbol in theoretical examinations; an incomplete transition table invalidates DFA determinism.\n"
-                    "- Self-loops indicate that the current condition remains unchanged upon reading that particular symbol."
-                ),
-                "takeaways": [
-                    "State diagrams provide intuitive visual models, while transition tables enable straightforward software or hardware synthesis.",
-                    "Every state in a DFA must have degree equal to $|\\Sigma|$."
-                ],
-                "questions": [
-                    "How do you indicate the initial state in a formal state transition table?",
-                    "What is the mathematical condition for a state to be classified as a dead/trap state?"
-                ]
-            }
-        ]
-    else:
-        modules = [
-            {
-                "topic": f"Core Foundations & Principles of {clean_topic}",
-                "plain_english": (
-                    f"This lecture explores the fundamental mechanics of {clean_topic}. "
-                    "Rather than viewing the topic as isolated facts, think of it as a systematic framework "
-                    "designed to solve core domain challenges step by step."
-                ),
-                "formal_definition": (
-                    f"**{clean_topic}** is defined as the analytical, theoretical, and operational methodology "
-                    "governing the systematic interactions, constraints, and transformations presented throughout the lecture."
-                ),
-                "deep_dive": (
-                    "- The instructor systematically establishes baseline definitions before advancing to complex edge cases.\n"
-                    "- Operational parameters and structural constraints must be verified prior to implementation.\n"
-                    "- Step-by-step methodologies prevent failure modes under standard working conditions."
-                ),
-                "nuances": (
-                    "- Do not confuse high-level conceptual heuristics with rigorous formal requirements.\n"
-                    "- Pay close attention to boundary conditions and implicit assumptions highlighted in the lecture."
-                ),
-                "takeaways": [
-                    f"Mastering foundational principles in {clean_topic} is essential for advanced problem solving.",
-                    "Systematic verification of assumptions prevents edge-case breakdown."
-                ],
-                "questions": [
-                    f"What is the primary operational objective of {clean_topic}?",
-                    "Which boundary conditions must be satisfied before applying this framework?"
+                    f"What are the central principles governing {clean_topic}?",
+                    f"How do the real-world factors discussed in the lecture influence outcomes in {clean_topic}?"
                 ]
             }
         ]

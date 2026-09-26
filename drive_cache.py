@@ -15,7 +15,7 @@ import shutil
 import logging
 import threading
 from pathlib import Path
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional
 
 log = logging.getLogger("drive_cache")
 

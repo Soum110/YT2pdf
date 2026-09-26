@@ -4,7 +4,6 @@ pdf_builder.py — Compile extracted slide images into a PDF with a cover page.
 
 import textwrap
 from pathlib import Path
-from typing import Optional
 from PIL import Image, ImageDraw, ImageFont
 import logging
 
