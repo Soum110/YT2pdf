@@ -39,7 +39,14 @@ Organize the study guide chronologically or thematically based on the lecture fl
 Execution Directives:
 Err on the side of giving too much detail. Leave no slide unexplained.
 Use bolding, bulleted, and numbered lists extensively for readability.
-Bridge the gaps between sparse slide text and the rich transcript audio."""
+Bridge the gaps between sparse slide text and the rich transcript audio.
+
+STRICT GROUNDING & ANTI-HALLUCINATION RULES:
+- You must ONLY teach concepts, definitions, formulas, workflows, and comparisons that are explicitly visible in the provided lecture slides or spoken in the audio/transcript.
+- Do NOT hallucinate generic meta-commentary, placeholders, or vague filler (e.g., NEVER say "The instructor introduces the core principles and context", "systematically explores key mechanisms", or "Pay close attention to underlying assumptions").
+- If the slide images and audio transcript are missing, unreadable, or empty, do NOT guess or generalize based on the lecture title alone. Instead, return exactly:
+  "ERROR: Multimodal lecture assets (slides/audio/transcript) could not be processed or lecture content could not be grounded."
+"""
 
 
 def _format_transcript_text(transcript_segments: Any) -> str:
@@ -130,14 +137,32 @@ def generate_study_guide(
     """
     Synthesizes a comprehensive, textbook-grade study guide from slides, audio, and transcript.
     Returns structured markdown conforming to the educational 6-section structure.
+    Uses Google GenAI File API for all multimodal assets (slide frames and audio)
+    to prevent request body drops, payload size errors, and hallucinated placeholders.
     """
     clean_topic = _clean_title(video_title)
+    
+    # ── 1. Payload Validation & Pre-flight Diagnostics ──
+    valid_slide_paths: List[Path] = []
+    for s in (slide_images or []):
+        p = Path(s) if isinstance(s, (str, Path)) else None
+        if p and p.exists() and p.stat().st_size > 500:
+            valid_slide_paths.append(p)
+
     has_valid_audio = _is_valid_audio_file(audio_path)
-    log.info("Generating multimodal study guide for '%s' (%d slides, audio=%s)...",
-             clean_topic, len(slide_images), has_valid_audio)
+    transcript_text = _format_transcript_text(transcript_segments)
+
+    log.info(
+        "Multimodal Payload Diagnostics for '%s': slides=%d valid (of %d), audio_valid=%s, transcript_chars=%d",
+        clean_topic, len(valid_slide_paths), len(slide_images or []), has_valid_audio, len(transcript_text)
+    )
+
+    if not valid_slide_paths and not has_valid_audio and not transcript_text:
+        log.error("Payload Validation Failed: Zero multimodal lecture assets available to ground study guide.")
+        return ""
 
     if not gemini_api_key or gemini_api_key == "YOUR_GEMINI_API_KEY_HERE":
-        log.warning("No Gemini API key supplied; compiling intelligent transcript study guide markdown.")
+        log.warning("No Gemini API key supplied; attempting transcript-only grounded synthesis.")
         return _generate_deterministic_markdown(
             video_title=clean_topic,
             transcript_segments=transcript_segments,
@@ -145,86 +170,96 @@ def generate_study_guide(
         )
 
     client = genai.Client(api_key=gemini_api_key)
-    audio_upload_obj = None
+    uploaded_files: List[Any] = []
 
     try:
-        # 1. Attach Key Slide Images
+        # ── 2. Upload Key Slide Images via Gemini File API ──
         slide_parts: List[types.Part] = []
-        stride = max(1, len(slide_images) // 12) if len(slide_images) > 12 else 1
-        sampled_slides = slide_images[::stride][:16]
-        log.info("Attaching %d representative slide images...", len(sampled_slides))
-        for img_path in sampled_slides:
-            p = Path(img_path)
-            if p.exists():
+        stride = max(1, len(valid_slide_paths) // 12) if len(valid_slide_paths) > 12 else 1
+        sampled_slides = valid_slide_paths[::stride][:14]
+        log.info("Processing %d representative slide frames for Gemini File API...", len(sampled_slides))
+
+        for p in sampled_slides:
+            uploaded_slide = None
+            try:
+                # Primary: Upload full visual frame to Google GenAI File API
+                log.info("Uploading slide frame %s to Gemini File API (%d bytes)...", p.name, p.stat().st_size)
+                uploaded_slide = client.files.upload(file=str(p))
+                if uploaded_slide and hasattr(uploaded_slide, "uri") and uploaded_slide.uri:
+                    uploaded_files.append(uploaded_slide)
+                    slide_parts.append(types.Part.from_uri(
+                        file_uri=uploaded_slide.uri,
+                        mime_type=getattr(uploaded_slide, "mime_type", "image/png") or "image/png"
+                    ))
+            except Exception as up_err:
+                log.warning("File API upload failed for slide %s (%s). Falling back to inline compressed bytes.", p.name, up_err)
                 try:
                     img_cv = cv2.imread(str(p))
                     if img_cv is not None:
                         h, w = img_cv.shape[:2]
-                        scale = 1024 / float(w) if w > 1024 else 1.0
+                        scale = 800 / float(w) if w > 800 else 1.0
                         resized = cv2.resize(img_cv, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
-                        success, enc = cv2.imencode(".jpg", resized, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                        success, enc = cv2.imencode(".jpg", resized, [cv2.IMWRITE_JPEG_QUALITY, 75])
                         if success:
-                            slide_parts.append(types.Part.from_bytes(
-                                data=enc.tobytes(),
-                                mime_type="image/jpeg"
-                            ))
-                except Exception as img_err:
-                    log.debug("Slide image attach skipped for %s: %s", p.name, img_err)
+                            slide_parts.append(types.Part.from_bytes(data=enc.tobytes(), mime_type="image/jpeg"))
+                except Exception as inline_err:
+                    log.debug("Inline attach skipped for %s: %s", p.name, inline_err)
 
-        # 2. Add Transcript & User Prompt
-        transcript_text = _format_transcript_text(transcript_segments)
-        user_prompt = f"# Lecture Study Guide Request: {clean_topic}\n"
-        user_prompt += f"Duration: {int(total_duration // 60)}m {int(total_duration % 60)}s\n"
-        user_prompt += f"Visual Slide Images Provided: {len(sampled_slides)}\n"
-        if has_valid_audio:
-            user_prompt += "Audio Track Attached: Yes (listen carefully to explanations, definitions, examples)\n"
-        if transcript_text:
-            user_prompt += f"\n## Spoken Lecture Transcript:\n{transcript_text[:65000]}\n"
-
-        user_prompt += "\nPlease teach all concepts comprehensively in detailed markdown following the exact 6-part structure specified in the system instructions."
-        prompt_part = types.Part.from_text(text=user_prompt)
-
-        # Core parts without audio (reliable baseline)
-        parts_no_audio = list(slide_parts) + [prompt_part]
-
-        # 3. Attach Audio Track if verified valid
+        # ── 3. Upload Audio File via Gemini File API (if present) ──
         audio_part: Optional[types.Part] = None
         if has_valid_audio:
             try:
                 audio_p = Path(audio_path)
                 file_size_mb = audio_p.stat().st_size / (1024 * 1024)
-                mime_type = "audio/mp3" if audio_p.suffix.lower() == ".mp3" else "audio/mp4"
-
-                if file_size_mb <= 18.0:
-                    log.info("Attaching inline audio track (%.1f MB, %s)...", file_size_mb, mime_type)
-                    audio_bytes = audio_p.read_bytes()
-                    audio_part = types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)
-                else:
-                    log.info("Uploading audio file to Gemini Files API (%.1f MB)...", file_size_mb)
-                    audio_upload_obj = client.files.upload(file=str(audio_p))
+                log.info("Uploading audio file to Gemini Files API (%.1f MB, %s)...", file_size_mb, audio_p.name)
+                audio_upload_obj = client.files.upload(file=str(audio_p))
+                if audio_upload_obj:
+                    uploaded_files.append(audio_upload_obj)
                     poll_start = time.time()
-                    while time.time() - poll_start < 90:
+                    while time.time() - poll_start < 60:
                         status_obj = client.files.get(name=audio_upload_obj.name)
-                        state = getattr(getattr(status_obj, "state", None), "name", str(getattr(status_obj, "state", "")))
-                        if state == "ACTIVE":
-                            audio_part = types.Part.from_uri(file_uri=audio_upload_obj.uri, mime_type=audio_upload_obj.mime_type)
+                        state = getattr(status_obj, "state", None)
+                        state_str = getattr(state, "name", str(state))
+                        if state_str == "ACTIVE":
+                            audio_part = types.Part.from_uri(
+                                file_uri=audio_upload_obj.uri,
+                                mime_type=getattr(audio_upload_obj, "mime_type", "audio/mp4") or "audio/mp4"
+                            )
+                            log.info("Audio file is ACTIVE in Gemini File API.")
                             break
-                        elif state == "FAILED":
-                            log.warning("Gemini file upload failed: %s", status_obj)
-                            audio_upload_obj = None
+                        elif state_str == "FAILED":
+                            log.warning("Gemini audio file processing failed: %s", status_obj)
+                            audio_part = None
                             break
-                        time.sleep(2.0)
-            except Exception as aud_prep_err:
-                log.warning("Audio preparation notice: %s", aud_prep_err)
+                        time.sleep(1.5)
+            except Exception as aud_err:
+                log.warning("Audio File API preparation notice: %s", aud_err)
                 audio_part = None
 
+        # ── 4. Build Grounded User Prompt ──
+        user_prompt = f"# University Lecture Study Guide Request: {clean_topic}\n"
+        user_prompt += f"Duration: {int(total_duration // 60)}m {int(total_duration % 60)}s\n"
+        user_prompt += f"Visual Slide Images Attached: {len(slide_parts)}\n"
+        if audio_part:
+            user_prompt += "Audio Track Attached: Yes (listen carefully to instructor explanations, definitions, examples)\n"
+        if transcript_text:
+            user_prompt += f"\n## Spoken Lecture Transcript:\n{transcript_text[:65000]}\n"
+
+        user_prompt += (
+            "\nTask: Synthesize a textbook-grade, concept-by-concept academic study guide in detailed markdown following the exact 6-part structure.\n"
+            "GROUNDING DIRECTIVE: Teach only the actual concepts, architectures, comparison matrices, equations, and definitions visible in the slides or spoken in the audio/transcript. "
+            "Do not output generic commentary or empty structural outlines."
+        )
+        prompt_part = types.Part.from_text(text=user_prompt)
+
+        parts_no_audio = list(slide_parts) + [prompt_part]
         content_parts = ([audio_part] if audio_part else []) + parts_no_audio
 
-        # 4. Generate Content via Gemini API
+        # ── 5. Call Gemini Models with Failover ──
         candidate_models = [model_name, "gemini-2.0-flash", "gemini-1.5-flash"]
         for cand_model in candidate_models:
             try:
-                log.info("Calling Gemini model %s for study guide synthesis...", cand_model)
+                log.info("Calling Gemini model %s for grounded study guide synthesis...", cand_model)
                 response = client.models.generate_content(
                     model=cand_model,
                     contents=[types.Content(role="user", parts=content_parts)],
@@ -235,15 +270,19 @@ def generate_study_guide(
                     ),
                 )
                 if response.text and response.text.strip():
-                    log.info("Successfully received study guide markdown (%d characters).", len(response.text))
-                    return response.text.strip()
+                    res_text = response.text.strip()
+                    if res_text.startswith("ERROR:") or "could not be processed" in res_text.lower():
+                        log.warning("Gemini returned anti-hallucination guardrail trigger: %s", res_text)
+                        return ""
+                    log.info("Successfully received grounded study guide markdown (%d characters).", len(res_text))
+                    return res_text
             except Exception as gen_err:
                 log.warning("Model %s generation failed: %s", cand_model, gen_err)
                 time.sleep(0.5)
 
-        # 4b. If multimodal call with audio failed, retry with slides + transcript only
-        if audio_part:
-            log.info("Retrying Gemini generation with slides + transcript (excluding audio payload)...")
+        # 5b. Retry without audio if multimodal with audio failed
+        if audio_part and slide_parts:
+            log.info("Retrying Gemini generation with slides + transcript (excluding audio)...")
             for cand_model in ["gemini-2.0-flash", "gemini-1.5-flash"]:
                 try:
                     response = client.models.generate_content(
@@ -256,20 +295,26 @@ def generate_study_guide(
                         ),
                     )
                     if response.text and response.text.strip():
-                        log.info("Successfully received study guide markdown without audio (%d chars).", len(response.text))
-                        return response.text.strip()
+                        res_text = response.text.strip()
+                        if res_text.startswith("ERROR:") or "could not be processed" in res_text.lower():
+                            log.warning("Gemini returned guardrail error: %s", res_text)
+                            return ""
+                        log.info("Successfully received study guide markdown without audio (%d chars).", len(res_text))
+                        return res_text
                 except Exception as retry_err:
                     log.warning("Retry without audio on %s failed: %s", cand_model, retry_err)
 
     finally:
-        # Cleanup uploaded audio file from Gemini Files API storage
-        if audio_upload_obj:
+        # ── 6. Guaranteed Cleanup of Uploaded Files from Gemini Files API ──
+        for f_obj in uploaded_files:
             try:
-                client.files.delete(name=audio_upload_obj.name)
-            except Exception:
-                pass
+                f_name = getattr(f_obj, "name", None) or str(f_obj)
+                client.files.delete(name=f_name)
+                log.debug("Deleted temporary Gemini File API asset: %s", f_name)
+            except Exception as del_err:
+                log.debug("Notice on Gemini file cleanup for %s: %s", getattr(f_obj, "name", ""), del_err)
 
-    log.warning("Gemini API calls exhausted or failed; compiling intelligent transcript study guide.")
+    log.warning("Gemini API calls failed or exhausted; compiling grounded transcript notes if available.")
     return _generate_deterministic_markdown(
         video_title=clean_topic,
         transcript_segments=transcript_segments,
@@ -375,37 +420,10 @@ def _generate_deterministic_markdown(
     modules = _build_modules_from_transcript(clean_topic, transcript_segments)
 
     if not modules:
-        # Honest fallback without transcript — strictly zero fake jargon
-        modules = [
-            {
-                "topic": f"Comprehensive Overview & Core Foundations of {clean_topic}",
-                "plain_english": (
-                    f"This study guide covers the core concepts, principles, and practical dynamics of {clean_topic}. "
-                    "Mastering this topic requires understanding the underlying mechanics, practical constraints, and real-world implications."
-                ),
-                "formal_definition": (
-                    f"**{clean_topic}** refers to the comprehensive subject matter presented in this lecture. "
-                    "Review each visual slide carefully alongside key definitions and problem formulations."
-                ),
-                "deep_dive": (
-                    f"- **Foundations**: The instructor introduces the core principles and context of {clean_topic}.\n"
-                    f"- **Analysis**: The lecture systematically explores key mechanisms, components, and workflows.\n"
-                    f"- **Application**: Real-world examples and case dynamics demonstrate practical execution."
-                ),
-                "nuances": (
-                    "- Pay close attention to underlying assumptions and prerequisite definitions.\n"
-                    "- Note distinctions between theoretical models and real-world implementations."
-                ),
-                "takeaways": [
-                    f"Foundational concepts of {clean_topic} form the prerequisite for advanced analysis.",
-                    "Verify all system assumptions and constraints before practical execution."
-                ],
-                "questions": [
-                    f"What are the central principles governing {clean_topic}?",
-                    f"How do the real-world factors discussed in the lecture influence outcomes in {clean_topic}?"
-                ]
-            }
-        ]
+        # Strict zero-hallucination / zero-boilerplate policy:
+        # If there is no transcript to extract real lecture words from, do NOT invent fake meta-commentary!
+        log.warning("No transcript content available to build grounded study guide. Refusing to emit generic boilerplate.")
+        return ""
 
     md_lines = [
         f"# {clean_topic}",

@@ -50,6 +50,34 @@ def _find_chrome() -> Optional[str]:
     return which_chrome
 
 
+def is_valid_study_guide_markdown(markdown_content: Optional[str]) -> bool:
+    """
+    Strictly verifies that study guide markdown is genuine, grounded academic notes
+    and not an error message, empty text, or generic AI boilerplate shell.
+    """
+    if not markdown_content:
+        return False
+    text = markdown_content.strip()
+    if len(text) < 300:
+        return False
+    if text.startswith("ERROR:") or text.startswith("Error:") or "could not be processed" in text.lower():
+        return False
+
+    banned_boilerplate_phrases = [
+        "refers to the comprehensive subject matter presented in this lecture",
+        "The instructor introduces the core principles and context",
+        "systematically explores key mechanisms, components, and workflows",
+        "Pay close attention to underlying assumptions and prerequisite definitions",
+        "Review each visual slide carefully alongside key definitions",
+    ]
+    for phrase in banned_boilerplate_phrases:
+        if phrase in text:
+            log.warning("Study guide rejected due to prohibited boilerplate phrase: '%s'", phrase)
+            return False
+
+    return True
+
+
 def compile_markdown_to_pdf(
     markdown_content: str,
     output_path: Union[str, Path],
@@ -58,7 +86,12 @@ def compile_markdown_to_pdf(
 ) -> bool:
     """
     Renders study guide markdown into a styled, publication-grade PDF.
+    Validates content quality to prevent printing bogus or empty documents.
     """
+    if not is_valid_study_guide_markdown(markdown_content):
+        log.warning("compile_markdown_to_pdf rejected content: insufficient length, error text, or prohibited boilerplate.")
+        return False
+
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -468,6 +501,9 @@ class StudyGuidePDF(FPDF):
 
 def _compile_fpdf_fallback(markdown_text: str, output_path: Union[str, Path], video_title: str) -> bool:
     """Renders structured study guide PDF with cover page and strict left-margin alignment."""
+    if not is_valid_study_guide_markdown(markdown_text):
+        log.warning("_compile_fpdf_fallback rejected content: insufficient length, error text, or prohibited boilerplate.")
+        return False
     try:
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)

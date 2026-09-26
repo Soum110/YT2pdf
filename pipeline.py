@@ -690,7 +690,7 @@ def run_pipeline(job_id: str, video_url: str, jobs_root: Path, gemini_api_key: s
         try:
             log.info("[%s] Synthesizing comprehensive AI study guide...", job_id)
             from study_guide_service import generate_study_guide
-            from pdf_study_guide_compiler import compile_markdown_to_pdf
+            from pdf_study_guide_compiler import compile_markdown_to_pdf, is_valid_study_guide_markdown
 
             guide_md = generate_study_guide(
                 slide_images=[s.image_path for s in verified],
@@ -700,30 +700,25 @@ def run_pipeline(job_id: str, video_url: str, jobs_root: Path, gemini_api_key: s
                 total_duration=float(duration),
                 gemini_api_key=gemini_api_key,
             )
-            (job_dir / "study_guide.md").write_text(guide_md, encoding="utf-8")
-
-            guide_pdf_path = job_dir / "study_guide.pdf"
-            guide_ready = compile_markdown_to_pdf(
-                markdown_content=guide_md,
-                output_path=guide_pdf_path,
-                video_title=video_title,
-                total_duration=float(duration),
-            )
-            if not guide_ready or not guide_pdf_path.exists() or guide_pdf_path.stat().st_size < 500:
-                from pdf_study_guide_compiler import _compile_fpdf_fallback
-                guide_ready = _compile_fpdf_fallback(guide_md, guide_pdf_path, video_title)
-            log.info("[%s] Study guide PDF ready: %s (size: %d bytes)", job_id, guide_ready, guide_pdf_path.stat().st_size if guide_pdf_path.exists() else 0)
+            if is_valid_study_guide_markdown(guide_md):
+                (job_dir / "study_guide.md").write_text(guide_md, encoding="utf-8")
+                guide_pdf_path = job_dir / "study_guide.pdf"
+                guide_ready = compile_markdown_to_pdf(
+                    markdown_content=guide_md,
+                    output_path=guide_pdf_path,
+                    video_title=video_title,
+                    total_duration=float(duration),
+                )
+                if not guide_ready or not guide_pdf_path.exists() or guide_pdf_path.stat().st_size < 500:
+                    from pdf_study_guide_compiler import _compile_fpdf_fallback
+                    guide_ready = _compile_fpdf_fallback(guide_md, guide_pdf_path, video_title)
+                log.info("[%s] Study guide PDF ready: %s (size: %d bytes)", job_id, guide_ready, guide_pdf_path.stat().st_size if guide_pdf_path.exists() else 0)
+            else:
+                log.warning("[%s] Generated study guide failed quality/grounding validation. Omitting study guide PDF.", job_id)
+                guide_ready = False
         except Exception as guide_err:
             log.warning("[%s] Study guide generation error: %s", job_id, guide_err)
-            try:
-                guide_pdf_path = job_dir / "study_guide.pdf"
-                from study_guide_service import _generate_deterministic_markdown
-                from pdf_study_guide_compiler import _compile_fpdf_fallback
-                fallback_md = _generate_deterministic_markdown(video_title, transcript_segments, float(duration))
-                (job_dir / "study_guide.md").write_text(fallback_md, encoding="utf-8")
-                guide_ready = _compile_fpdf_fallback(fallback_md, guide_pdf_path, video_title)
-            except Exception as fb_err:
-                log.error("[%s] Emergency study guide fallback failed: %s", job_id, fb_err)
+            guide_ready = False
 
         (job_dir / "outputs.json").write_text(json.dumps({
             "slides_pdf": True,
@@ -965,7 +960,7 @@ def run_pipeline_from_frames(
         try:
             log.info("[%s] Synthesizing companion AI study guide (audio=%s)...", job_id, bool(audio_file_candidate))
             from study_guide_service import generate_study_guide
-            from pdf_study_guide_compiler import compile_markdown_to_pdf
+            from pdf_study_guide_compiler import compile_markdown_to_pdf, is_valid_study_guide_markdown
 
             guide_md = generate_study_guide(
                 slide_images=[s.image_path for s in verified],
@@ -975,30 +970,25 @@ def run_pipeline_from_frames(
                 total_duration=float(duration),
                 gemini_api_key=gemini_api_key,
             )
-            (job_dir / "study_guide.md").write_text(guide_md, encoding="utf-8")
-
-            guide_pdf_path = job_dir / "study_guide.pdf"
-            guide_ready = compile_markdown_to_pdf(
-                markdown_content=guide_md,
-                output_path=guide_pdf_path,
-                video_title=video_title,
-                total_duration=float(duration),
-            )
-            if not guide_ready or not guide_pdf_path.exists() or guide_pdf_path.stat().st_size < 500:
-                from pdf_study_guide_compiler import _compile_fpdf_fallback
-                guide_ready = _compile_fpdf_fallback(guide_md, guide_pdf_path, video_title)
-            log.info("[%s] Companion study guide PDF ready: %s (size: %d bytes)", job_id, guide_ready, guide_pdf_path.stat().st_size if guide_pdf_path.exists() else 0)
+            if is_valid_study_guide_markdown(guide_md):
+                (job_dir / "study_guide.md").write_text(guide_md, encoding="utf-8")
+                guide_pdf_path = job_dir / "study_guide.pdf"
+                guide_ready = compile_markdown_to_pdf(
+                    markdown_content=guide_md,
+                    output_path=guide_pdf_path,
+                    video_title=video_title,
+                    total_duration=float(duration),
+                )
+                if not guide_ready or not guide_pdf_path.exists() or guide_pdf_path.stat().st_size < 500:
+                    from pdf_study_guide_compiler import _compile_fpdf_fallback
+                    guide_ready = _compile_fpdf_fallback(guide_md, guide_pdf_path, video_title)
+                log.info("[%s] Companion study guide PDF ready: %s (size: %d bytes)", job_id, guide_ready, guide_pdf_path.stat().st_size if guide_pdf_path.exists() else 0)
+            else:
+                log.warning("[%s] Generated study guide failed quality/grounding validation. Omitting study guide PDF.", job_id)
+                guide_ready = False
         except Exception as guide_err:
             log.warning("[%s] Companion study guide generation failed: %s", job_id, guide_err)
-            try:
-                guide_pdf_path = job_dir / "study_guide.pdf"
-                from study_guide_service import _generate_deterministic_markdown
-                from pdf_study_guide_compiler import _compile_fpdf_fallback
-                fallback_md = _generate_deterministic_markdown(video_title, transcript_segments, float(duration))
-                (job_dir / "study_guide.md").write_text(fallback_md, encoding="utf-8")
-                guide_ready = _compile_fpdf_fallback(fallback_md, guide_pdf_path, video_title)
-            except Exception as fb_err:
-                log.error("[%s] Emergency companion study guide fallback failed: %s", job_id, fb_err)
+            guide_ready = False
 
         (job_dir / "outputs.json").write_text(json.dumps({
             "slides_pdf": True,
