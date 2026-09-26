@@ -186,7 +186,8 @@ class CompanionFrame(BaseModel):
 
 
 class CompanionUploadRequest(BaseModel):
-    video_url: str
+    video_url: Optional[str] = None
+    video_id: Optional[str] = None
     title: str = "Presentation Slides"
     duration: Optional[float] = 0.0
     frames: list[CompanionFrame]
@@ -280,9 +281,15 @@ async def upload_companion_frames(req: CompanionUploadRequest):
     job_id = str(uuid.uuid4())[:8]
     job_dir = JOBS_ROOT / job_id
 
+    video_url = req.video_url
+    if not video_url and req.video_id:
+        video_url = f"https://www.youtube.com/watch?v={req.video_id}"
+    if not video_url:
+        video_url = "https://www.youtube.com/watch?v=companion"
+
     # Check 5TB Cloud Storage / Drive Cache first
     from drive_cache import cache_manager, extract_youtube_id
-    video_id = extract_youtube_id(req.video_url)
+    video_id = extract_youtube_id(video_url) or req.video_id
     if video_id and cache_manager.get_cached_job(video_id, job_dir):
         log.info("Instant Cache Hit for companion video %s! Serving as job %s", video_id, job_id)
         return JSONResponse(content={
@@ -310,7 +317,7 @@ async def upload_companion_frames(req: CompanionUploadRequest):
         job_id=job_id,
         frames_data=frames_dicts,
         video_title=req.title,
-        video_url=req.video_url,
+        video_url=video_url,
         duration=req.duration or 0.0,
         jobs_root=JOBS_ROOT,
         gemini_api_key=GEMINI_API_KEY,
@@ -320,7 +327,7 @@ async def upload_companion_frames(req: CompanionUploadRequest):
         audio_mime=req.audio_mime or "audio/mp4",
     )
 
-    log.info("Companion job %s started for %s with %d frames", job_id, req.video_url, len(req.frames))
+    log.info("Companion job %s started for %s with %d frames", job_id, video_url, len(req.frames))
     return JSONResponse(content={
         "job_id": job_id,
         "status": "processing",

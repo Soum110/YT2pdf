@@ -24,7 +24,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, Union
 
 log = logging.getLogger("pipeline")
 

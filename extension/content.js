@@ -496,8 +496,8 @@
       candidateBases.push(window.location.origin);
     }
     const defaultBases = [
-      "https://yt2pdfs.com",
       "https://yt2pdf-214301889618.europe-west1.run.app",
+      "https://yt2pdfs.com",
       "http://localhost:8080",
       "http://localhost:8000"
     ];
@@ -561,10 +561,15 @@
         return bgResult;
       } catch (bgErr) {
         console.warn("[YT2PDF Companion] Background worker error, falling back to direct upload:", bgErr.message);
+        try {
+          return await directUploadFrames(payload);
+        } catch (directErr) {
+          throw new Error(bgErr.message || directErr.message || "Failed to upload slides to server.");
+        }
       }
     }
 
-    // 2. Direct web upload fallback
+    // 2. Direct web upload fallback if extension context is not valid
     return await directUploadFrames(payload);
   }
 
@@ -1167,6 +1172,7 @@
 
       const payload = {
         video_url: cleanUrl,
+        video_id: videoId,
         title: videoTitle,
         duration: duration,
         frames: capturedSlides,
