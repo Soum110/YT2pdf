@@ -1461,15 +1461,20 @@
             <span>100% Done</span>
           `;
         }
-        showToast("🎉 Slides extracted! Opening YT2PDFS to download your PDF...");
+        showToast("🎉 Slides extracted! Opening YT2PDFS in a new tab to download your PDF...");
         const jobId = event.data.job_id;
         let webBase = event.data.backend_base || "https://yt2pdfs.com";
         if (!webBase.includes("localhost") && !webBase.includes("127.0.0.1")) {
           webBase = "https://yt2pdfs.com";
         }
-        setTimeout(() => {
-          window.location.href = `${webBase}/?job_id=${jobId}`;
-        }, 400);
+        const destinationUrl = `${webBase}/?job_id=${jobId}`;
+        safeSendRuntimeMessage({
+          action: "open_website_tab",
+          job_id: jobId,
+          base: webBase,
+          url: destinationUrl
+        });
+        setTimeout(() => resetButton(buttonEl), 6000);
       } else if (event.data.type === "YT2PDF_HEADLESS_ERROR") {
         const errMsg = event.data.error || "";
         // If embed player failed (e.g. video owner disabled external embedding), fallback to /watch in frame
@@ -1644,17 +1649,21 @@
                 <span>100% Done</span>
               `;
             }
-            showToast("🎉 Slides extracted! Opening YT2PDFS to download your PDF...");
+            showToast("🎉 Slides extracted! Opening YT2PDFS in a new tab to download your PDF...");
             if (request.data?.job_id) {
               let webBase = request.data.backend_base || "https://yt2pdfs.com";
               if (!webBase.includes("localhost") && !webBase.includes("127.0.0.1")) {
                 webBase = "https://yt2pdfs.com";
               }
               const destinationUrl = `${webBase}/?job_id=${request.data.job_id}`;
-              setTimeout(() => {
-                window.location.href = destinationUrl;
-              }, 400);
+              safeSendRuntimeMessage({
+                action: "open_website_tab",
+                job_id: request.data.job_id,
+                base: webBase,
+                url: destinationUrl
+              });
             }
+            setTimeout(() => resetButton(btn), 6000);
           } else {
             if (btn) {
               btn.innerHTML = `<span>Failed</span>`;

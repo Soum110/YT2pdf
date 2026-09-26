@@ -95,6 +95,28 @@ if (chrome.runtime?.onInstalled) chrome.runtime.onInstalled.addListener(setupDNR
 if (chrome.runtime?.onStartup) chrome.runtime.onStartup.addListener(setupDNRRules);
 
 const activeExtractions = new Map();
+const openedJobs = new Set();
+
+function openJobInNewTab(jobId, webBase) {
+  if (!jobId || openedJobs.has(jobId)) return;
+  openedJobs.add(jobId);
+  // Keep set bounded
+  if (openedJobs.size > 50) {
+    const first = openedJobs.values().next().value;
+    openedJobs.delete(first);
+  }
+  let base = webBase || "https://yt2pdfs.com";
+  if (!base.includes("localhost") && !base.includes("127.0.0.1")) {
+    base = "https://yt2pdfs.com";
+  }
+  const destUrl = `${base}/?job_id=${jobId}`;
+  console.log("[YT2PDF Background] Opening website in a new tab:", destUrl);
+  chrome.tabs.create({ url: destUrl, active: true }, (tab) => {
+    if (chrome.runtime.lastError) {
+      console.warn("[YT2PDF Background] Notice creating tab:", chrome.runtime.lastError.message);
+    }
+  });
+}
 
 function findExtraction(sender) {
   const tabId = sender?.tab?.id;
@@ -158,15 +180,9 @@ function cleanupExtraction(identifier, error = null, resultData = null) {
     } catch (e) {}
   }
 
-  // Direct foreground redirection if requested (e.g. from YouTube watch page)
-  if (!error && resultData?.job_id && item.redirectOnSuccess && item.originTabId) {
-    let webBase = resultData.backend_base || "https://yt2pdfs.com";
-    if (!webBase.includes("localhost") && !webBase.includes("127.0.0.1")) {
-      webBase = "https://yt2pdfs.com";
-    }
-    const destUrl = `${webBase}/?job_id=${resultData.job_id}`;
-    console.log("[YT2PDF Background] Direct foreground redirection for origin tab to:", destUrl);
-    chrome.tabs.update(item.originTabId, { url: destUrl }).catch(() => {});
+  // Open website in a NEW tab upon success (leaving YouTube session completely intact)
+  if (!error && resultData?.job_id && item.redirectOnSuccess) {
+    openJobInNewTab(resultData.job_id, resultData.backend_base);
   }
 
   if (item.originTabId) {
@@ -297,18 +313,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               });
             }
 
-            // Direct Redirection Guarantee: Redirect the origin tab or open foreground tab
+            // Direct Redirection Guarantee: Open website in a NEW tab (preserving YouTube session)
             const shouldRedirect = Boolean(message.redirect_on_success || message.payload?.redirect_on_success || pending?.redirectOnSuccess);
-            if (shouldRedirect) {
-              let webBase = "https://yt2pdfs.com";
-              if (base.includes("localhost") || base.includes("127.0.0.1")) {
-                webBase = base;
-              }
-              const destUrl = `${webBase}/?job_id=${data.job_id}`;
-              console.log("[YT2PDF Background] Direct foreground redirection for:", destUrl);
-              if (pending && pending.originTabId) {
-                chrome.tabs.update(pending.originTabId, { url: destUrl }).catch(() => {});
-              }
+            if (shouldRedirect && data.job_id) {
+              openJobInNewTab(data.job_id, base);
             }
 
             if (pending) {
@@ -343,17 +351,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; // Keep message channel open for async response
   }
 
-  // 6. Reliable Website Redirection (bypasses browser popup blockers)
-  if (message.action === "open_website_tab" && message.url) {
-    console.log("[YT2PDF Background] Opening website tab for:", message.url);
-    try {
-      chrome.tabs.create({ url: message.url, active: true }, (tab) => {
-        sendResponse({ success: true, tab_id: tab?.id });
-      });
-    } catch (tabErr) {
-      console.warn("[YT2PDF Background] Failed to open tab:", tabErr);
-      sendResponse({ success: false, error: tabErr.message });
+  // 6. Reliable Website Redirection in a NEW tab (bypasses browser popup blockers, preserves YouTube tab)
+  if ((message.action === "open_website_tab" || message.action === "open_tab")) {
+    if (message.job_id) {
+      openJobInNewTab(message.job_id, message.base || message.url);
+    } else if (message.url) {
+      console.log("[YT2PDF Background] Opening website tab for:", message.url);
+      try {
+        chrome.tabs.create({ url: message.url, active: true }, (tab) => {
+          sendResponse({ success: true, tab_id: tab?.id });
+        });
+      } catch (tabErr) {
+        console.warn("[YT2PDF Background] Failed to open tab:", tabErr);
+        sendResponse({ success: false, error: tabErr.message });
+      }
+      return true;
     }
+    sendResponse({ success: true });
     return true;
   }
 });

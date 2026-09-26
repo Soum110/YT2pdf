@@ -3469,75 +3469,89 @@
     }
   }
 
+  let isDownloadingSlides = false;
   async function downloadSlides() {
-    if (!jobId) return;
+    if (!jobId || isDownloadingSlides) return;
+    isDownloadingSlides = true;
     const url = getDownloadUrl(`/api/download/${jobId}`);
 
-    // Strategy 1: Direct link trigger
-    const a = document.createElement("a");
-    a.href = url;
-    a.setAttribute("download", `lecture_slides_${jobId}.pdf`);
-    a.target = "_blank";
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => a.remove(), 250);
-
-    // Strategy 2 (Guaranteed Fallback): Fetch blob directly to ensure saving even if browser blocks cross-origin link
     try {
+      // Primary Strategy: Fetch blob directly to ensure saving with accurate filename
       const res = await apiFetch(`/api/download/${jobId}`);
       if (res.ok) {
         const blob = await res.blob();
         if (blob && blob.size > 200) {
           const blobUrl = window.URL.createObjectURL(blob);
-          const bLink = document.createElement("a");
-          bLink.href = blobUrl;
-          bLink.setAttribute("download", `lecture_slides_${jobId}.pdf`);
-          document.body.appendChild(bLink);
-          bLink.click();
+          const a = document.createElement("a");
+          a.href = blobUrl;
+          a.setAttribute("download", `lecture_slides_${jobId}.pdf`);
+          document.body.appendChild(a);
+          a.click();
           setTimeout(() => {
-            bLink.remove();
+            a.remove();
             window.URL.revokeObjectURL(blobUrl);
-          }, 1500);
+          }, 2000);
+          return;
         }
       }
+      throw new Error("Blob fetch response invalid");
     } catch (err) {
-      console.warn("Direct blob download error:", err);
+      console.warn("Direct blob download failed, falling back to direct link trigger:", err);
+      // Fallback Strategy: Direct link trigger ONLY if blob fetch failed
+      const a = document.createElement("a");
+      a.href = url;
+      a.setAttribute("download", `lecture_slides_${jobId}.pdf`);
+      a.target = "_blank";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => a.remove(), 500);
+    } finally {
+      setTimeout(() => {
+        isDownloadingSlides = false;
+      }, 1500);
     }
   }
 
+  let isDownloadingGuide = false;
   async function downloadGuide() {
-    if (!jobId) return;
+    if (!jobId || isDownloadingGuide) return;
+    isDownloadingGuide = true;
     const url = getDownloadUrl(`/api/download/${jobId}/guide`);
 
-    // Strategy 1: Direct link trigger
-    const a = document.createElement("a");
-    a.href = url;
-    a.setAttribute("download", `study_guide_${jobId}.pdf`);
-    a.target = "_blank";
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => a.remove(), 250);
-
-    // Strategy 2: Blob fallback
     try {
+      // Primary Strategy: Fetch blob directly to ensure saving with accurate filename
       const res = await apiFetch(`/api/download/${jobId}/guide`);
       if (res.ok) {
         const blob = await res.blob();
         if (blob && blob.size > 200) {
           const blobUrl = window.URL.createObjectURL(blob);
-          const bLink = document.createElement("a");
-          bLink.href = blobUrl;
-          bLink.setAttribute("download", `study_guide_${jobId}.pdf`);
-          document.body.appendChild(bLink);
-          bLink.click();
+          const a = document.createElement("a");
+          a.href = blobUrl;
+          a.setAttribute("download", `study_guide_${jobId}.pdf`);
+          document.body.appendChild(a);
+          a.click();
           setTimeout(() => {
-            bLink.remove();
+            a.remove();
             window.URL.revokeObjectURL(blobUrl);
-          }, 1500);
+          }, 2000);
+          return;
         }
       }
+      throw new Error("Blob fetch response invalid");
     } catch (err) {
-      console.warn("Direct blob guide download error:", err);
+      console.warn("Direct blob guide download failed, falling back to direct link trigger:", err);
+      // Fallback Strategy: Direct link trigger ONLY if blob fetch failed
+      const a = document.createElement("a");
+      a.href = url;
+      a.setAttribute("download", `study_guide_${jobId}.pdf`);
+      a.target = "_blank";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => a.remove(), 500);
+    } finally {
+      setTimeout(() => {
+        isDownloadingGuide = false;
+      }, 1500);
     }
   }
 
