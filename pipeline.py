@@ -672,16 +672,27 @@ def run_pipeline(job_id: str, video_url: str, jobs_root: Path, gemini_api_key: s
                 video_title=video_title,
                 total_duration=float(duration),
             )
+            if not guide_ready or not guide_pdf_path.exists() or guide_pdf_path.stat().st_size < 500:
+                from pdf_study_guide_compiler import _compile_fpdf_fallback
+                guide_ready = _compile_fpdf_fallback(guide_md, guide_pdf_path, video_title)
             log.info("[%s] Study guide PDF ready: %s (size: %d bytes)", job_id, guide_ready, guide_pdf_path.stat().st_size if guide_pdf_path.exists() else 0)
         except Exception as guide_err:
             log.warning("[%s] Study guide generation error: %s", job_id, guide_err)
+            try:
+                guide_pdf_path = job_dir / "study_guide.pdf"
+                from study_guide_service import _generate_deterministic_markdown
+                from pdf_study_guide_compiler import _compile_fpdf_fallback
+                fallback_md = _generate_deterministic_markdown(video_title, transcript_segments, float(duration))
+                (job_dir / "study_guide.md").write_text(fallback_md, encoding="utf-8")
+                guide_ready = _compile_fpdf_fallback(fallback_md, guide_pdf_path, video_title)
+            except Exception as fb_err:
+                log.error("[%s] Emergency study guide fallback failed: %s", job_id, fb_err)
 
-        if guide_ready:
-            (job_dir / "outputs.json").write_text(json.dumps({
-                "slides_pdf": True,
-                "study_guide_pdf": True,
-                "slide_count": len(verified),
-            }))
+        (job_dir / "outputs.json").write_text(json.dumps({
+            "slides_pdf": True,
+            "study_guide_pdf": bool(guide_ready),
+            "slide_count": len(verified),
+        }))
 
         # ── Cache completed job ───────────────────────────────────────────
         try:
@@ -926,13 +937,25 @@ def run_pipeline_from_frames(
                 video_title=video_title,
                 total_duration=float(duration),
             )
+            if not guide_ready or not guide_pdf_path.exists() or guide_pdf_path.stat().st_size < 500:
+                from pdf_study_guide_compiler import _compile_fpdf_fallback
+                guide_ready = _compile_fpdf_fallback(guide_md, guide_pdf_path, video_title)
             log.info("[%s] Companion study guide PDF ready: %s (size: %d bytes)", job_id, guide_ready, guide_pdf_path.stat().st_size if guide_pdf_path.exists() else 0)
         except Exception as guide_err:
             log.warning("[%s] Companion study guide generation failed: %s", job_id, guide_err)
+            try:
+                guide_pdf_path = job_dir / "study_guide.pdf"
+                from study_guide_service import _generate_deterministic_markdown
+                from pdf_study_guide_compiler import _compile_fpdf_fallback
+                fallback_md = _generate_deterministic_markdown(video_title, transcript_segments, float(duration))
+                (job_dir / "study_guide.md").write_text(fallback_md, encoding="utf-8")
+                guide_ready = _compile_fpdf_fallback(fallback_md, guide_pdf_path, video_title)
+            except Exception as fb_err:
+                log.error("[%s] Emergency companion study guide fallback failed: %s", job_id, fb_err)
 
         (job_dir / "outputs.json").write_text(json.dumps({
             "slides_pdf": True,
-            "study_guide_pdf": guide_ready,
+            "study_guide_pdf": bool(guide_ready),
             "slide_count": len(verified),
         }))
         _write_status(
@@ -1133,13 +1156,25 @@ def run_pipeline_from_video_file(
                 video_title=video_title,
                 total_duration=float(duration),
             )
+            if not guide_ready or not guide_pdf_path.exists() or guide_pdf_path.stat().st_size < 500:
+                from pdf_study_guide_compiler import _compile_fpdf_fallback
+                guide_ready = _compile_fpdf_fallback(guide_md, guide_pdf_path, video_title)
             log.info("[%s] Uploaded video study guide PDF ready: %s (size: %d bytes)", job_id, guide_ready, guide_pdf_path.stat().st_size if guide_pdf_path.exists() else 0)
         except Exception as guide_err:
             log.warning("[%s] Uploaded video study guide synthesis error: %s", job_id, guide_err)
+            try:
+                guide_pdf_path = job_dir / "study_guide.pdf"
+                from study_guide_service import _generate_deterministic_markdown
+                from pdf_study_guide_compiler import _compile_fpdf_fallback
+                fallback_md = _generate_deterministic_markdown(video_title, [], float(duration))
+                (job_dir / "study_guide.md").write_text(fallback_md, encoding="utf-8")
+                guide_ready = _compile_fpdf_fallback(fallback_md, guide_pdf_path, video_title)
+            except Exception as fb_err:
+                log.error("[%s] Emergency upload study guide fallback failed: %s", job_id, fb_err)
 
         (job_dir / "outputs.json").write_text(json.dumps({
             "slides_pdf": True,
-            "study_guide_pdf": guide_ready,
+            "study_guide_pdf": bool(guide_ready),
             "slide_count": len(verified),
         }))
         _write_status(

@@ -3842,8 +3842,10 @@
       let pollAttempts = 0;
       studyGuidePollTimer = setInterval(async () => {
         pollAttempts++;
-        if (pollAttempts > 45) {
+        if (pollAttempts > 30) {
           clearInterval(studyGuidePollTimer);
+          // Unlock button so clicking triggers on-the-fly server compilation if not yet compiled
+          updateGuideUI(true);
           return;
         }
         try {
@@ -3856,7 +3858,7 @@
             }
           }
         } catch (e) {}
-      }, 3000);
+      }, 2500);
     }
 
     loadSlidePreview(jobId);

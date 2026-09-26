@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "YT2PDF Slide Companion",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Capture presentation slides from YouTube videos and generate clean, high-resolution study PDFs on YT2PDFS.com.",
   "icons": {
     "16": "icons/icon-16.png",

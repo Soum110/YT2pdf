@@ -200,6 +200,31 @@ def generate_study_guide(
                 log.warning("Model %s generation failed: %s", cand_model, gen_err)
                 time.sleep(1.0)
 
+        # 4b. If multimodal call failed and audio was included, retry with slides + transcript only
+        if audio_path or audio_upload_obj:
+            log.info("Retrying Gemini generation with slides + transcript (excluding audio payload)...")
+            parts_no_audio = [
+                p for p in content_parts
+                if not (isinstance(p, types.Part) and getattr(p, "inline_data", None) and "audio" in getattr(p.inline_data, "mime_type", ""))
+                and p != audio_upload_obj
+            ]
+            for cand_model in ["gemini-2.0-flash", "gemini-1.5-flash"]:
+                try:
+                    response = client.models.generate_content(
+                        model=cand_model,
+                        contents=[types.Content(role="user", parts=parts_no_audio)],
+                        config=types.GenerateContentConfig(
+                            system_instruction=STUDY_GUIDE_SYSTEM_PROMPT,
+                            temperature=0.3,
+                            max_output_tokens=8192,
+                        ),
+                    )
+                    if response.text and response.text.strip():
+                        log.info("Successfully received study guide markdown without audio (%d chars).", len(response.text))
+                        return response.text.strip()
+                except Exception as retry_err:
+                    log.warning("Retry without audio on %s failed: %s", cand_model, retry_err)
+
     finally:
         # Cleanup uploaded audio file from Gemini Files API storage
         if audio_upload_obj:

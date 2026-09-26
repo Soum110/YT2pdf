@@ -91,7 +91,7 @@
     const dataB = ctxB.getImageData(0, 0, w, h).data;
 
     let totalDiff = 0;
-    let identicalPixels = 0;
+    let changedPixels = 0;
     const numPixels = w * h;
     const totalBytes = numPixels * 4;
 
@@ -100,28 +100,28 @@
       const lumB = 0.299 * dataB[i] + 0.587 * dataB[i + 1] + 0.114 * dataB[i + 2];
       const d = Math.abs(lumA - lumB);
       totalDiff += d;
-      if (d < 18) {
-        identicalPixels++;
+      if (d > 22) {
+        changedPixels++;
       }
     }
 
     const meanDiff = totalDiff / (numPixels * 255);
-    const identicalRatio = identicalPixels / numPixels;
+    const changedRatio = changedPixels / numPixels;
 
     const clarityA = computeClarity(canvasA);
     const clarityB = computeClarity(canvasB);
 
-    // If >= 78% of the slide pixels match, it's the SAME slide (instructor moved/gestured)
-    const isSameSlide = identicalRatio >= 0.78 && meanDiff < 0.11;
-    // New slide if substantial change across the canvas
-    const isNewSlide = !isSameSlide && (meanDiff >= 0.045 || identicalRatio < 0.72);
+    // If meanDiff < 0.020 and changedRatio < 0.035, it is genuinely the SAME slide (minor motion/jitter)
+    const isSameSlide = meanDiff < 0.020 && changedRatio < 0.035;
+    // New distinct slide if mean difference >= 0.024 OR >= 4.0% of the canvas pixels changed
+    const isDistinct = !isSameSlide && (meanDiff >= 0.024 || changedRatio >= 0.040);
 
     return {
       meanDiff,
-      identicalRatio,
+      changedRatio,
       isSameSlide,
-      isNewSlide,
-      isDistinct: isNewSlide,
+      isNewSlide: isDistinct,
+      isDistinct,
       clarityA,
       clarityB,
     };
@@ -883,14 +883,14 @@
       }
 
       // Smart adaptive sampling: high accuracy, zero slide misses, minimal data usage
-      let targetSamples = 65;
-      if (duration < 300) targetSamples = Math.max(16, Math.floor(duration / 12));
-      else if (duration < 900) targetSamples = 38;
-      else if (duration < 2400) targetSamples = 58;
-      else if (duration < 5400) targetSamples = 72;
-      else targetSamples = 80;
+      let targetSamples = 70;
+      if (duration < 300) targetSamples = Math.max(20, Math.floor(duration / 10));
+      else if (duration < 900) targetSamples = 50;
+      else if (duration < 2400) targetSamples = 70;
+      else if (duration < 5400) targetSamples = 85;
+      else targetSamples = 95;
 
-      let step = Math.max(8, Math.floor(duration / targetSamples));
+      let step = Math.max(6, Math.floor(duration / targetSamples));
 
       const samplePoints = [];
       const startT = Math.max(2, Math.floor(duration * 0.005));
@@ -933,6 +933,23 @@
 
         dismissOverlaysAndSkipAds(activeVideo);
 
+        // Instruct YouTube player to seek via main world player API
+        try {
+          const s = document.createElement("script");
+          s.textContent = `
+            (() => {
+              try {
+                const p = document.getElementById("movie_player");
+                if (p && typeof p.seekTo === "function") {
+                  p.seekTo(${targetTime}, true);
+                }
+              } catch(e) {}
+            })();
+          `;
+          (document.documentElement || document.head || document.body).appendChild(s);
+          s.remove();
+        } catch(e) {}
+
         let onSeeked = null;
         await Promise.race([
           new Promise((resolve) => {
@@ -944,14 +961,21 @@
               resolve();
             }
           }),
-          unthrottledSleep(280)
+          unthrottledSleep(900)
         ]).finally(() => {
           if (onSeeked && activeVideo) {
             try { activeVideo.removeEventListener("seeked", onSeeked); } catch(e) {}
           }
         });
 
-        await unthrottledSleep(30);
+        // Ensure video is not stuck buffering or seeking
+        let waitLoops = 0;
+        while (activeVideo.seeking && waitLoops < 6) {
+          await unthrottledSleep(80);
+          waitLoops++;
+        }
+
+        await unthrottledSleep(40);
       }
 
       for (let i = 0; i < finalPoints.length; i++) {
@@ -990,7 +1014,15 @@
           });
         } else {
           const diffResult = calculateDifference(thumbCanvas, lastCapturedCanvas);
-          if (diffResult.isSameSlide) {
+          if (diffResult.isDistinct) {
+            lastCapturedCtx.drawImage(thumbCanvas, 0, 0, 64, 36);
+            captureCtx.drawImage(currentVideo, 0, 0, 1280, 720);
+            capturedSlides.push({
+              timestamp: timeTarget,
+              time_formatted: formatTimestamp(timeTarget),
+              data: captureCanvas.toDataURL("image/jpeg", 0.70)
+            });
+          } else if (diffResult.isSameSlide) {
             // Instructor movement detected! Check if this frame is clearer (less obstructed)
             if (diffResult.clarityA > diffResult.clarityB * 1.05) {
               lastCapturedCtx.drawImage(thumbCanvas, 0, 0, 64, 36);
@@ -1001,23 +1033,15 @@
                 data: captureCanvas.toDataURL("image/jpeg", 0.70)
               };
             }
-          } else if (diffResult.isNewSlide || diffResult.isDistinct) {
-            lastCapturedCtx.drawImage(thumbCanvas, 0, 0, 64, 36);
-            captureCtx.drawImage(currentVideo, 0, 0, 1280, 720);
-            capturedSlides.push({
-              timestamp: timeTarget,
-              time_formatted: formatTimestamp(timeTarget),
-              data: captureCanvas.toDataURL("image/jpeg", 0.70)
-            });
           }
         }
       }
 
       // Timeline Gap & End-of-Lecture Safety Net:
-      // Ensure no slides are skipped in long gaps (> 90s) or missed at the end of the video
+      // Ensure no slides are skipped in long gaps (> 70s) or missed at the end of the video
       const gaps = [];
-      const gapThreshold = Math.max(90, Math.floor(step * 2.5));
-      if (capturedSlides.length > 0 && duration > 60) {
+      const gapThreshold = Math.max(70, Math.floor(step * 2.2));
+      if (capturedSlides.length > 0 && duration > 45) {
         for (let idx = 0; idx < capturedSlides.length - 1; idx++) {
           const tA = capturedSlides[idx].timestamp;
           const tB = capturedSlides[idx + 1].timestamp;
@@ -1026,29 +1050,34 @@
           }
         }
         const lastTs = capturedSlides[capturedSlides.length - 1].timestamp;
-        if (lastTs < duration - 35) {
+        if (lastTs < duration - 25) {
           console.log(`[YT2PDF Companion] End-of-lecture gap detected (last slide: ${lastTs}s, duration: ${duration}s). Sampling closing slide...`);
-          gaps.push(Math.max(2, duration - 10));
+          gaps.push(Math.max(2, duration - 8));
         }
       }
 
       if (gaps.length > 0 || (capturedSlides.length < 6 && duration > 60)) {
         console.log(`[YT2PDF Companion] Filling ${gaps.length} timeline gaps across lecture...`);
         const existingTs = new Set(capturedSlides.map(s => Math.floor(s.timestamp)));
-        const chkPoints = gaps.length > 0 ? gaps.slice(0, 10) : finalPoints.filter((_, idx) => idx % Math.max(1, Math.floor(finalPoints.length / 8)) === 0);
+        const chkPoints = gaps.length > 0 ? gaps.slice(0, 12) : finalPoints.filter((_, idx) => idx % Math.max(1, Math.floor(finalPoints.length / 8)) === 0);
         for (const tPoint of chkPoints) {
-          if (![...existingTs].some(ts => Math.abs(ts - tPoint) < 14)) {
+          if (![...existingTs].some(ts => Math.abs(ts - tPoint) < 12)) {
             try {
               await seekToTime(tPoint);
               const currentVideo = document.querySelector("video.html5-main-video, video") || video;
               if (currentVideo) {
-                captureCtx.drawImage(currentVideo, 0, 0, 1280, 720);
-                capturedSlides.push({
-                  timestamp: tPoint,
-                  time_formatted: formatTimestamp(tPoint),
-                  data: captureCanvas.toDataURL("image/jpeg", 0.70)
-                });
-                existingTs.add(Math.floor(tPoint));
+                thumbCtx.drawImage(currentVideo, 0, 0, 64, 36);
+                const diffResult = calculateDifference(thumbCanvas, lastCapturedCanvas);
+                if (diffResult.isDistinct || capturedSlides.length < 3) {
+                  lastCapturedCtx.drawImage(thumbCanvas, 0, 0, 64, 36);
+                  captureCtx.drawImage(currentVideo, 0, 0, 1280, 720);
+                  capturedSlides.push({
+                    timestamp: tPoint,
+                    time_formatted: formatTimestamp(tPoint),
+                    data: captureCanvas.toDataURL("image/jpeg", 0.70)
+                  });
+                  existingTs.add(Math.floor(tPoint));
+                }
               }
             } catch (e) {}
           }

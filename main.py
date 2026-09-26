@@ -495,12 +495,46 @@ async def download_slides_pdf(job_id: str):
 
 @app.api_route("/api/download/{job_id}/guide", methods=["GET", "HEAD"])
 async def download_guide_pdf(job_id: str):
-    """Download the AI comprehensive study guide PDF."""
-    pdf_path = JOBS_ROOT / job_id / "study_guide.pdf"
-    if not pdf_path.exists() or pdf_path.stat().st_size < 1500:
+    """Download the AI comprehensive study guide PDF with on-the-fly compilation resilience."""
+    import json
+    job_dir = JOBS_ROOT / job_id
+    pdf_path = job_dir / "study_guide.pdf"
+
+    # On-the-fly compilation if PDF is missing or under 500 bytes
+    if not pdf_path.exists() or pdf_path.stat().st_size < 500:
+        md_path = job_dir / "study_guide.md"
+        meta_file = job_dir / "meta.json"
+        video_title = "Lecture Study Guide"
+        duration = 0.0
+        if meta_file.exists():
+            try:
+                mdata = json.loads(meta_file.read_text())
+                video_title = mdata.get("title") or mdata.get("video_title") or video_title
+                duration = float(mdata.get("duration") or 0.0)
+            except Exception:
+                pass
+
+        guide_md = ""
+        if md_path.exists():
+            guide_md = md_path.read_text(encoding="utf-8")
+        else:
+            from study_guide_service import _generate_deterministic_markdown
+            guide_md = _generate_deterministic_markdown(video_title=video_title, total_duration=duration)
+            md_path.write_text(guide_md, encoding="utf-8")
+
+        from pdf_study_guide_compiler import compile_markdown_to_pdf, _compile_fpdf_fallback
+        compiled = compile_markdown_to_pdf(
+            markdown_content=guide_md,
+            output_path=pdf_path,
+            video_title=video_title,
+            total_duration=duration,
+        )
+        if not compiled or not pdf_path.exists() or pdf_path.stat().st_size < 500:
+            _compile_fpdf_fallback(guide_md, pdf_path, video_title)
+
+    if not pdf_path.exists() or pdf_path.stat().st_size < 500:
         raise HTTPException(status_code=404, detail="Study guide PDF not ready yet or job not found.")
 
-    import json
     meta_file = JOBS_ROOT / job_id / "meta.json"
     filename = "study_guide.pdf"
     if meta_file.exists():
@@ -534,7 +568,7 @@ async def get_outputs(job_id: str):
     import json
     slides_dir = JOBS_ROOT / job_id / "slides"
     has_slides = slides_dir.exists() and any(slides_dir.glob("slide_*.png"))
-    has_guide_pdf = (JOBS_ROOT / job_id / "study_guide.pdf").exists() and (JOBS_ROOT / job_id / "study_guide.pdf").stat().st_size > 1500
+    has_guide_pdf = (JOBS_ROOT / job_id / "study_guide.pdf").exists() and (JOBS_ROOT / job_id / "study_guide.pdf").stat().st_size > 500
 
     outputs_file = JOBS_ROOT / job_id / "outputs.json"
     if outputs_file.exists():
@@ -641,11 +675,12 @@ async def rebuild_slides_pdf(job_id: str, req: RebuildSlidesRequest):
         include_cover=True,
     )
 
-    # Update outputs.json with new slide count
+    # Update outputs.json with new slide count while preserving study guide status
+    has_guide_pdf = (JOBS_ROOT / job_id / "study_guide.pdf").exists() and (JOBS_ROOT / job_id / "study_guide.pdf").stat().st_size > 500
     outputs_file = JOBS_ROOT / job_id / "outputs.json"
     outputs_file.write_text(json.dumps({
         "slides_pdf": True,
-        "study_guide_pdf": False,
+        "study_guide_pdf": has_guide_pdf,
         "slide_count": len(valid_paths),
     }))
 

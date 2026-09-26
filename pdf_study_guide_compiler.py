@@ -85,27 +85,33 @@ def compile_markdown_to_pdf(
 
             cmd = [
                 chrome_bin,
-                "--headless=new" if "Chrome" in chrome_bin else "--headless",
+                "--headless=new",
                 "--disable-gpu",
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
+                "--no-zygote",
+                "--single-process",
+                "--disable-software-rasterizer",
+                "--disable-extensions",
                 "--run-all-compositor-stages-before-draw",
                 f"--print-to-pdf={output_path.resolve()}",
                 "--no-pdf-header-footer",
                 temp_html_path.resolve().as_uri(),
             ]
             log.info("Compiling PDF with Chromium (%s)...", chrome_bin)
-            res = subprocess.run(cmd, capture_output=True, timeout=60)
+            res = subprocess.run(cmd, capture_output=True, timeout=30)
             try:
                 temp_html_path.unlink(missing_ok=True)
             except Exception:
                 pass
 
-            if output_path.exists() and output_path.stat().st_size > 1500:
+            if output_path.exists() and output_path.stat().st_size > 500:
                 log.info("Successfully compiled study guide PDF (%d bytes).", output_path.stat().st_size)
                 return True
             else:
-                log.warning("Chromium PDF compilation output invalid: %s", res.stderr.decode("utf-8", errors="ignore"))
+                log.warning("Chromium PDF compilation output invalid (size %d bytes): %s",
+                            output_path.stat().st_size if output_path.exists() else 0,
+                            res.stderr.decode("utf-8", errors="ignore"))
         except Exception as e:
             log.warning("Chromium PDF compilation error: %s", e)
 
@@ -385,21 +391,76 @@ def _build_html_document(body_html: str, video_title: str, total_duration: float
 </html>"""
 
 
-def _compile_fpdf_fallback(markdown_text: str, output_path: Path, video_title: str) -> bool:
-    """Basic fallback text-based PDF using fpdf2."""
+def _sanitize_for_latin1(text: str) -> str:
+    replacements = {
+        "—": "--",
+        "–": "-",
+        "•": "*",
+        "·": "*",
+        "“": '"',
+        "”": '"',
+        "‘": "'",
+        "’": "'",
+        "…": "...",
+        "≥": ">=",
+        "≤": "<=",
+        "≠": "!=",
+        "≈": "~=",
+        "→": "->",
+        "←": "<-",
+        "⇒": "=>",
+        "×": "x",
+        "÷": "/",
+        "±": "+/-",
+        "°": " deg",
+        "µ": "u",
+        "∑": "SUM",
+        "∏": "PROD",
+        "√": "sqrt",
+        "∞": "inf",
+        "⏱": "[Duration]",
+        "🎓": "[Format]",
+        "📚": "[Study Guide]",
+        "💡": "[Tip]",
+        "⚠️": "[Note]",
+        "✅": "[Check]",
+        "❌": "[X]",
+    }
+    for k, v in replacements.items():
+        text = text.replace(k, v)
+    return text.encode("latin-1", "replace").decode("latin-1")
+
+
+def _compile_fpdf_fallback(markdown_text: str, output_path: Union[str, Path], video_title: str) -> bool:
+    """Basic fallback text-based PDF using fpdf2 with guaranteed UTF-8/Latin-1 safety."""
     try:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         from fpdf import FPDF
         pdf = FPDF(orientation="P", unit="mm", format="A4")
         pdf.set_auto_page_break(auto=True, margin=15)
         pdf.add_page()
-        pdf.set_font("Helvetica", "B", 18)
-        pdf.multi_cell(0, 10, video_title)
-        pdf.ln(5)
-        pdf.set_font("Helvetica", "I", 10)
-        pdf.cell(0, 6, "Comprehensive Academic Study Guide", ln=True)
-        pdf.ln(8)
 
-        pdf.set_font("Helvetica", "", 9)
+        # Try to use DejaVuSans if present on system for true Unicode support
+        dejavu_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+        font_name = "Helvetica"
+        if os.path.exists(dejavu_path):
+            try:
+                pdf.add_font("DejaVu", "", dejavu_path)
+                font_name = "DejaVu"
+            except Exception:
+                font_name = "Helvetica"
+
+        safe_title = video_title if font_name == "DejaVu" else _sanitize_for_latin1(video_title)
+        pdf.set_font(font_name, "B" if font_name == "Helvetica" else "", 16)
+        pdf.multi_cell(pdf.epw, 9, safe_title)
+        pdf.ln(3)
+
+        pdf.set_font(font_name, "I" if font_name == "Helvetica" else "", 10)
+        pdf.multi_cell(pdf.epw, 6, "Comprehensive Academic Study Guide")
+        pdf.ln(5)
+
+        pdf.set_font(font_name, "", 9)
         # Strip markdown syntax for basic fallback
         clean_text = re.sub(r'[*_#`]', '', markdown_text)
         for line in clean_text.split("\n"):
@@ -410,10 +471,15 @@ def _compile_fpdf_fallback(markdown_text: str, output_path: Path, video_title: s
             if not line:
                 pdf.ln(2)
                 continue
-            pdf.multi_cell(0, 5, line)
+            safe_line = line if font_name == "DejaVu" else _sanitize_for_latin1(line)
+            try:
+                pdf.multi_cell(pdf.epw, 5, safe_line)
+            except Exception:
+                # Emergency ascii fallback for problematic line
+                pdf.multi_cell(pdf.epw, 5, safe_line.encode("ascii", "ignore").decode("ascii"))
 
         pdf.output(str(output_path))
-        return output_path.exists() and output_path.stat().st_size > 1000
+        return output_path.exists() and output_path.stat().st_size > 500
     except Exception as e:
         log.error("FPDF fallback failed: %s", e)
         return False
