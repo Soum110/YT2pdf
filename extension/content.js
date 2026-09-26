@@ -1218,12 +1218,19 @@
         stage: "uploading"
       });
 
-      const handleUploadSuccess = (jobId, base) => {
+      const handleUploadSuccess = async (jobId, base) => {
         if (audioInfo && audioInfo.audio_url && jobId) {
-          uploadAudioInBackground(jobId, audioInfo.audio_url, base);
+          try {
+            await Promise.race([
+              uploadAudioInBackground(jobId, audioInfo.audio_url, base),
+              new Promise((resolve) => setTimeout(resolve, 3500))
+            ]);
+          } catch (audWaitErr) {
+            console.warn("[YT2PDF Companion] Audio upload wait notice:", audWaitErr);
+          }
         }
 
-        // 1. Notify background worker immediately so it closes the window and redirects origin tab!
+        // 1. Notify background worker so it closes the window and redirects origin tab!
         safeSendRuntimeMessage({
           action: "headless_extraction_direct_success",
           data: {
