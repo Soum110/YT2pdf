@@ -202,13 +202,11 @@
 
       // Strategy 3: If inside an embed or script tags had no captionTracks, fetch watch page directly
       if (!captionTracks || captionTracks.length === 0) {
-        let vId = videoId;
-        if (!vId) {
-          try {
-            const u = new URL(window.location.href);
-            vId = u.searchParams.get("v") || (u.pathname.includes("/embed/") ? u.pathname.split("/embed/")[1]?.split("?")[0] : "");
-          } catch(e) {}
-        }
+        let vId = "";
+        try {
+          const u = new URL(window.location.href);
+          vId = u.searchParams.get("v") || (u.pathname.includes("/embed/") ? u.pathname.split("/embed/")[1]?.split("?")[0] : "");
+        } catch(e) {}
         if (vId) {
           try {
             console.log(`[YT2PDF Companion] Fetching watch page HTML directly for video ${vId}...`);
@@ -871,13 +869,26 @@
       if (!videoTitle) videoTitle = "Presentation Slides";
 
       let cleanUrl = window.location.href;
+      let videoId = "";
       if (window.location.pathname.includes("/embed/")) {
         const vid = window.location.pathname.split("/embed/")[1]?.split("?")[0];
         if (vid) {
+          videoId = vid;
           cleanUrl = `https://www.youtube.com/watch?v=${vid}`;
         }
       } else {
+        try {
+          const u = new URL(window.location.href);
+          if (u.searchParams.has("v")) videoId = u.searchParams.get("v") || "";
+          else if (u.pathname.includes("/shorts/")) videoId = u.pathname.split("/shorts/")[1]?.split("/")[0] || "";
+        } catch(e) {}
         cleanUrl = cleanUrl.replace(/([&?])yt2pdf_headless=1&?/, "$1").replace(/[?&]$/, "");
+      }
+      if (!videoId) {
+        try {
+          const u = new URL(window.location.href);
+          videoId = u.searchParams.get("v") || "";
+        } catch(e) {}
       }
 
       // Smart adaptive sampling: high accuracy, zero slide misses, minimal data usage
