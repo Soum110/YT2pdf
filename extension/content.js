@@ -10,7 +10,7 @@
   // ─────────────────────────────────────────────
   // Toast notification
   // ─────────────────────────────────────────────
-  function showToast(message, isError = false) {
+  function showToast(message, isError = false, linkUrl = null) {
     const existing = document.getElementById("yt2pdf-toast");
     if (existing) existing.remove();
 
@@ -34,8 +34,9 @@
       align-items: center;
       gap: 10px;
       animation: yt2pdf-fade-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-      max-width: 440px;
+      max-width: 460px;
       line-height: 1.4;
+      ${linkUrl ? "cursor: pointer;" : ""}
     `;
 
     toast.innerHTML = `
@@ -49,6 +50,14 @@
       <span>${message}</span>
     `;
 
+    if (linkUrl) {
+      toast.title = "Click to open YT2PDFS notes in a new tab";
+      toast.addEventListener("click", (e) => {
+        if (e.target && e.target.tagName === "A") return; // Let <a> handle itself
+        window.open(linkUrl, "_blank");
+      });
+    }
+
     document.body.appendChild(toast);
 
     setTimeout(() => {
@@ -58,7 +67,7 @@
         toast.style.transform = "translateY(12px)";
         setTimeout(() => toast.remove(), 380);
       }
-    }, 5500);
+    }, linkUrl ? 12000 : 5500);
   }
 
   // ─────────────────────────────────────────────
@@ -1472,26 +1481,44 @@
       } else if (event.data.type === "YT2PDF_HEADLESS_COMPLETE") {
         cleanupHeadlessFrame();
         isExtracting = false;
-        if (buttonEl) {
-          buttonEl.innerHTML = `
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2BA640" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-            <span>100% Done</span>
-          `;
-        }
-        showToast("🎉 Slides extracted! Opening YT2PDFS in a new tab to download your PDF...");
         const jobId = event.data.job_id;
         let webBase = event.data.backend_base || "https://yt2pdfs.com";
         if (!webBase.includes("localhost") && !webBase.includes("127.0.0.1")) {
           webBase = "https://yt2pdfs.com";
         }
         const destinationUrl = `${webBase}/?job_id=${jobId}`;
+
+        if (buttonEl) {
+          buttonEl.innerHTML = `
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2BA640" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            <span>Open Notes &rarr;</span>
+          `;
+          buttonEl.title = "Click to open your extracted notes and download PDF on YT2PDFS.com";
+          buttonEl.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            window.open(destinationUrl, "_blank");
+          };
+        }
+
+        showToast(
+          `🎉 Slides extracted! <a href="${destinationUrl}" target="_blank" style="color:#60A5FA;text-decoration:underline;margin-left:4px;font-weight:600;">View & Download PDF &rarr;</a>`,
+          false,
+          destinationUrl
+        );
+
         safeSendRuntimeMessage({
           action: "open_website_tab",
           job_id: jobId,
           base: webBase,
           url: destinationUrl
         });
-        setTimeout(() => resetButton(buttonEl), 6000);
+
+        try {
+          window.open(destinationUrl, "_blank");
+        } catch (e) {}
+
+        setTimeout(() => resetButton(buttonEl), 15000);
       } else if (event.data.type === "YT2PDF_HEADLESS_ERROR") {
         const errMsg = event.data.error || "";
         // If embed player failed (e.g. video owner disabled external embedding), fallback to /watch in frame
@@ -1660,27 +1687,46 @@
         if (request.action === "extraction_finished") {
           const btn = document.getElementById("yt2pdf-action-btn");
           if (request.success) {
+            const jobId = request.data?.job_id;
+            let webBase = request.data?.backend_base || "https://yt2pdfs.com";
+            if (!webBase.includes("localhost") && !webBase.includes("127.0.0.1")) {
+              webBase = "https://yt2pdfs.com";
+            }
+            const destinationUrl = jobId ? `${webBase}/?job_id=${jobId}` : "https://yt2pdfs.com";
+
             if (btn) {
               btn.innerHTML = `
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2BA640" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                <span>100% Done</span>
+                <span>Open Notes &rarr;</span>
               `;
+              btn.title = "Click to open your extracted notes and download PDF on YT2PDFS.com";
+              btn.onclick = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                window.open(destinationUrl, "_blank");
+              };
             }
-            showToast("🎉 Slides extracted! Opening YT2PDFS in a new tab to download your PDF...");
-            if (request.data?.job_id) {
-              let webBase = request.data.backend_base || "https://yt2pdfs.com";
-              if (!webBase.includes("localhost") && !webBase.includes("127.0.0.1")) {
-                webBase = "https://yt2pdfs.com";
-              }
-              const destinationUrl = `${webBase}/?job_id=${request.data.job_id}`;
+
+            showToast(
+              `🎉 Slides extracted! <a href="${destinationUrl}" target="_blank" style="color:#60A5FA;text-decoration:underline;margin-left:4px;font-weight:600;">View & Download PDF &rarr;</a>`,
+              false,
+              destinationUrl
+            );
+
+            if (jobId) {
               safeSendRuntimeMessage({
                 action: "open_website_tab",
-                job_id: request.data.job_id,
+                job_id: jobId,
                 base: webBase,
                 url: destinationUrl
               });
             }
-            setTimeout(() => resetButton(btn), 6000);
+
+            try {
+              window.open(destinationUrl, "_blank");
+            } catch (e) {}
+
+            setTimeout(() => resetButton(btn), 15000);
           } else {
             if (btn) {
               btn.innerHTML = `<span>Failed</span>`;

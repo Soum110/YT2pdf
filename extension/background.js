@@ -181,7 +181,7 @@ function cleanupExtraction(identifier, error = null, resultData = null) {
   }
 
   // Open website in a NEW tab upon success (leaving YouTube session completely intact)
-  if (!error && resultData?.job_id && item.redirectOnSuccess) {
+  if (!error && resultData?.job_id) {
     openJobInNewTab(resultData.job_id, resultData.backend_base);
   }
 
@@ -314,8 +314,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
 
             // Direct Redirection Guarantee: Open website in a NEW tab (preserving YouTube session)
-            const shouldRedirect = Boolean(message.redirect_on_success || message.payload?.redirect_on_success || pending?.redirectOnSuccess);
-            if (shouldRedirect && data.job_id) {
+            if (data.job_id) {
               openJobInNewTab(data.job_id, base);
             }
 
