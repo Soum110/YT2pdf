@@ -206,9 +206,10 @@
     } else if (event.data?.type === "YT2PDF_HEADLESS_COMPLETE") {
       dispatchResult({
         success: true,
-        job_id: event.data.job_id,
+        job_id: event.data.job_id || event.data.deck?.deckId,
         backend_base: event.data.backend_base,
-        slide_count: event.data.slide_count
+        slide_count: event.data.slide_count,
+        deck: event.data.deck
       });
     } else if (event.data?.type === "YT2PDF_HEADLESS_ERROR") {
       const errMsg = event.data.error || "";
@@ -228,6 +229,47 @@
     }
   });
 
+  // ─────────────────────────────────────────────
+  // Local Deck Retrieval from Extension Storage
+  // ─────────────────────────────────────────────
+  function loadDeckFromStorage(deckId) {
+    if (!isExtensionContextValid() || !chrome?.storage?.local) return;
+    try {
+      const keys = deckId ? [deckId, "latest_deck_id"] : ["latest_deck_id"];
+      chrome.storage.local.get(keys, (res) => {
+        const targetId = deckId || res?.latest_deck_id;
+        const deck = res ? res[targetId] : null;
+        if (deck) {
+          console.log(`[YT2PDF Bridge] Retrieved presentation deck ${targetId} (${deck.slideCount || 0} slides)`);
+          window.dispatchEvent(new CustomEvent("YT2PDF_CLIENT_DECK_LOADED", { detail: { deck } }));
+          window.postMessage({ type: "YT2PDF_CLIENT_DECK_LOADED", deck }, "*");
+        }
+      });
+    } catch (e) {
+      console.warn("[YT2PDF Bridge] Deck retrieval notice:", e);
+    }
+  }
+
+  // Listen for requests from webpage
+  window.addEventListener("YT2PDF_LOAD_DECK", (evt) => {
+    loadDeckFromStorage(evt?.detail?.deck_id);
+  });
+  window.addEventListener("message", (evt) => {
+    if (evt.data?.type === "YT2PDF_LOAD_DECK") {
+      loadDeckFromStorage(evt.data?.deck_id);
+    }
+  });
+
+  // Check URL on initialization for ?deck_id=...
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("deck_id")) {
+      const dId = params.get("deck_id");
+      setTimeout(() => loadDeckFromStorage(dId), 150);
+      setTimeout(() => loadDeckFromStorage(dId), 500);
+      setTimeout(() => loadDeckFromStorage(dId), 1200);
+    }
+  } catch (e) {}
 
   // Also listen for ping requests from webpage via CustomEvent
   window.addEventListener("YT2PDF_PING", () => {

@@ -3014,6 +3014,10 @@
   }
 
   function getDownloadUrl(path) {
+    if (!path) return "";
+    if (typeof path === "string" && (path.startsWith("data:") || path.startsWith("blob:") || path.startsWith("http:") || path.startsWith("https:"))) {
+      return path;
+    }
     return (activeBackendPrefix || "") + path;
   }
 
@@ -3269,6 +3273,70 @@
     }
   }
 
+  function loadClientDeck(deck) {
+    if (!deck || !deck.slides || deck.slides.length === 0) return;
+    isLocalExtraction = true;
+    jobId = deck.deckId || `deck_${Date.now()}`;
+    allJobSlides = deck.slides;
+    selectedSlideSet = new Set(allJobSlides.map(s => s.filename));
+
+    const cleanTitle = (deck.videoTitle || "Lecture").replace(/[/\\?%*:|"<>]/g, '_').trim();
+    localPdfFilename = `${cleanTitle}_Slides.pdf`;
+
+    try {
+      if (typeof ClientPdfBuilder !== "undefined" && ClientPdfBuilder.generatePdfFromJpegList) {
+        localPdfBlob = ClientPdfBuilder.generatePdfFromJpegList(allJobSlides);
+      }
+    } catch (e) {
+      console.warn("Could not pre-build local PDF blob:", e);
+    }
+
+    renderSlideCards();
+    updateCurationCounts();
+
+    document.getElementById("result-section").style.display = "block";
+    document.getElementById("progress-section").style.display = "none";
+    document.getElementById("error-section").style.display = "none";
+
+    const dlBtn = document.getElementById("dl-slides-btn");
+    if (dlBtn) dlBtn.style.display = "inline-flex";
+    const bannerDlBtn = document.getElementById("banner-dl-slides-btn");
+    if (bannerDlBtn) bannerDlBtn.style.display = "inline-flex";
+
+    const bannerTitle = document.getElementById("recent-job-id");
+    if (bannerTitle) bannerTitle.textContent = deck.videoTitle || "Presentation Slides";
+
+    try {
+      const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
+      window.history.replaceState({ path: cleanUrl }, "", cleanUrl);
+    } catch (e) {}
+
+    try {
+      document.getElementById("result-section").scrollIntoView({ behavior: "smooth" });
+    } catch(e) {}
+  }
+
+  // Listen for deck loaded from companion extension (via web_bridge.js)
+  window.addEventListener("YT2PDF_CLIENT_DECK_LOADED", (e) => {
+    if (e.detail?.deck) loadClientDeck(e.detail.deck);
+  });
+  window.addEventListener("message", (e) => {
+    if (e.data?.type === "YT2PDF_CLIENT_DECK_LOADED" && e.data.deck) {
+      loadClientDeck(e.data.deck);
+    }
+  });
+
+  function checkUrlDeck() {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.has("deck_id")) {
+        const dId = params.get("deck_id");
+        window.dispatchEvent(new CustomEvent("YT2PDF_LOAD_DECK", { detail: { deck_id: dId } }));
+        window.postMessage({ type: "YT2PDF_LOAD_DECK", deck_id: dId }, "*");
+      }
+    } catch (e) {}
+  }
+
   function handleCompanionIndicatorClick() {
     const isCompanionActive = document.documentElement.dataset.yt2pdfCompanion === "active" ||
                               document.documentElement.getAttribute("data-yt2pdf-companion") === "active" ||
@@ -3477,21 +3545,27 @@
         }));
       });
 
-      if (companionResult && companionResult.success && companionResult.job_id) {
-        jobId = companionResult.job_id;
-        localStorage.setItem("yt2pdf_last_job", jobId);
-        const banner = document.getElementById("recent-job-banner");
-        if (banner) banner.style.display = "none";
+      if (companionResult && companionResult.success) {
+        if (companionResult.deck) {
+          loadClientDeck(companionResult.deck);
+          return;
+        }
+        if (companionResult.job_id) {
+          jobId = companionResult.job_id;
+          localStorage.setItem("yt2pdf_last_job", jobId);
+          const banner = document.getElementById("recent-job-banner");
+          if (banner) banner.style.display = "none";
 
-        updateProgress({
-          stage: "companion_received",
-          progress: 68,
-          message: `Received ${companionResult.slide_count || ""} slides. Generating PDFs...`
-        });
+          updateProgress({
+            stage: "companion_received",
+            progress: 68,
+            message: `Received ${companionResult.slide_count || ""} slides. Generating PDFs...`
+          });
 
-        pollErrorCount = 0;
-        pollTimer = setInterval(pollStatus, 2000);
-        return;
+          pollErrorCount = 0;
+          pollTimer = setInterval(pollStatus, 2000);
+          return;
+        }
       } else {
         const errMsg = companionResult?.error || "Background slide extraction failed.";
         console.warn("Companion extraction failed:", errMsg);
@@ -4035,6 +4109,7 @@
 
   window.addEventListener("DOMContentLoaded", async () => {
     initCompanionDetection();
+    checkUrlDeck();
     const params = new URLSearchParams(window.location.search);
     const urlJob = params.get("job_id") || params.get("job");
     if (urlJob) {

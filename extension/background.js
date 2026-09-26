@@ -350,7 +350,55 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; // Keep message channel open for async response
   }
 
-  // 6. Direct Client-Side PDF Download via Chrome Downloads API
+  // 6. Save extracted presentation deck to chrome.storage.local
+  if (message.action === "deck_ready" && message.deck) {
+    const deck = message.deck;
+    const deckId = deck.deckId || `deck_${Date.now()}`;
+    chrome.storage.local.set({
+      [deckId]: deck,
+      "latest_deck_id": deckId
+    }, () => {
+      console.log(`[YT2PDF Background] Presentation deck ${deckId} (${deck.slideCount || 0} slides) saved in local storage.`);
+      sendResponse({ success: true, deckId: deckId });
+    });
+    return true;
+  }
+
+  // 7. Direct user to website Slide Studio
+  if (message.action === "open_deck_page") {
+    const deckId = message.deckId;
+    (async () => {
+      let targetBase = "https://yt2pdfs.com";
+      let existingTab = null;
+      try {
+        const tabs = await chrome.tabs.query({});
+        for (const t of tabs) {
+          if (t.url && (t.url.includes("localhost:") || t.url.includes("127.0.0.1:"))) {
+            const u = new URL(t.url);
+            targetBase = `${u.protocol}//${u.host}`;
+          }
+          if (t.url && (t.url.includes("yt2pdfs.com") || t.url.includes("localhost:8000") || t.url.includes("localhost:8080"))) {
+            existingTab = t;
+          }
+        }
+      } catch (e) {}
+
+      const destUrl = `${targetBase}/?deck_id=${deckId}`;
+      console.log("[YT2PDF Background] Directing user to website Slide Studio:", destUrl);
+      if (existingTab && existingTab.id) {
+        chrome.tabs.update(existingTab.id, { url: destUrl, active: true }, () => {
+          sendResponse({ success: true, url: destUrl });
+        });
+      } else {
+        chrome.tabs.create({ url: destUrl, active: true }, () => {
+          sendResponse({ success: true, url: destUrl });
+        });
+      }
+    })();
+    return true;
+  }
+
+  // 8. Direct Client-Side PDF Download via Chrome Downloads API
   if (message.action === "download_pdf") {
     const filename = (message.filename || "Lecture_Slides.pdf").replace(/[/\\?%*:|"<>]/g, '_');
     const safeName = filename.endsWith(".pdf") ? filename : `${filename}.pdf`;

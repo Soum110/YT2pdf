@@ -1118,66 +1118,44 @@
 
       console.log(`[YT2PDF Companion] Silent background extraction complete (${capturedSlides.length} slides). Transmitting...`);
 
-      console.log(`[YT2PDF Companion] Silent extraction complete (${capturedSlides.length} slides). Compiling PDF directly in browser...`);
-
-      // Broadcast progress that frame scanning is done and PDF compilation begins
-      safeSendRuntimeMessage({
-        action: "headless_progress",
-        current: finalPoints.length,
-        total: finalPoints.length,
-        stage: "building_pdf"
-      });
+      console.log(`[YT2PDF Companion] Silent extraction complete (${capturedSlides.length} slides). Packaging presentation deck...`);
 
       const cleanTitle = (videoTitle || "Lecture_Slides").replace(/[/\\?%*:|"<>]/g, '_').trim();
-      const filename = `${cleanTitle}_Slides.pdf`;
+      const deckId = `deck_${Date.now()}`;
+      const deckPayload = {
+        deckId: deckId,
+        videoTitle: videoTitle,
+        videoId: videoId,
+        videoUrl: cleanUrl,
+        slideCount: capturedSlides.length,
+        slides: capturedSlides.map((s, idx) => ({
+          index: idx + 1,
+          filename: `slide_${idx + 1}.jpg`,
+          timestamp_sec: s.timestamp,
+          timestamp_str: s.time_formatted || formatTimestamp(s.timestamp),
+          title: `Slide ${idx + 1}`,
+          image_url: s.data,
+          data: s.data
+        })),
+        createdAt: Date.now()
+      };
 
-      try {
-        if (typeof ClientPdfBuilder === "undefined" || !ClientPdfBuilder.generatePdfFromJpegList) {
-          throw new Error("ClientPdfBuilder not loaded in page context.");
-        }
+      // Save deck in chrome.storage.local via background worker
+      safeSendRuntimeMessage({
+        action: "deck_ready",
+        deck: deckPayload
+      });
 
-        const pdfBlob = ClientPdfBuilder.generatePdfFromJpegList(capturedSlides);
-        console.log(`[YT2PDF Companion] PDF generated (${Math.round(pdfBlob.size / 1024)} KB)! Triggering download...`);
-
-        // Convert blob to Data URL for Chrome downloads API in background worker
-        const reader = new FileReader();
-        reader.onloadend = function() {
-          const dataUrl = reader.result;
-          safeSendRuntimeMessage({
-            action: "download_pdf",
-            url: dataUrl,
-            filename: filename
-          });
-
-          // Also trigger direct anchor download in page as fallback
-          try {
-            ClientPdfBuilder.downloadPdfBlob(pdfBlob, filename);
-          } catch(e) {}
-
-          // Notify parent frame
-          if (window.parent && window.parent !== window) {
-            try {
-              window.parent.postMessage({
-                type: "YT2PDF_HEADLESS_COMPLETE",
-                success: true,
-                slide_count: capturedSlides.length,
-                filename: filename
-              }, "*");
-            } catch(e) {}
-          }
-        };
-        reader.readAsDataURL(pdfBlob);
-
-      } catch (pdfErr) {
-        console.error("[YT2PDF Companion] Client PDF compilation error:", pdfErr);
-        if (window.parent && window.parent !== window) {
-          try {
-            window.parent.postMessage({
-              type: "YT2PDF_HEADLESS_ERROR",
-              error: pdfErr.message
-            }, "*");
-          } catch(e) {}
-        }
+      // If running inside an iframe (e.g. headless frame on website or YouTube watch page), notify parent frame
+      if (window.parent && window.parent !== window) {
+        try {
+          window.parent.postMessage({
+            type: "YT2PDF_HEADLESS_COMPLETE",
+            success: true,
+            slide_count: capturedSlides.length,
+            deck: deckPayload
+          }, "*");
+        } catch(e) {}
       }
 
     } catch (err) {
@@ -1386,22 +1364,42 @@
         cleanupHeadlessFrame();
         isExtracting = false;
         const count = event.data.slide_count || 1;
-        const filename = event.data.filename || "Lecture_Slides.pdf";
+        const deckId = event.data.deck?.deckId;
 
         if (buttonEl) {
+          buttonEl.disabled = false;
+          buttonEl.style.cursor = "pointer";
           buttonEl.innerHTML = `
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2BA640" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-            <span>Downloaded (${count})</span>
+            <span>View Slides (${count}) &rarr;</span>
           `;
-          buttonEl.title = `Extracted ${count} slides. Downloaded "${filename}" to your computer!`;
+          buttonEl.title = `Extracted ${count} slides. Click to open in YT2PDF Slide Studio!`;
+          buttonEl.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (deckId) {
+              safeSendRuntimeMessage({
+                action: "open_deck_page",
+                deckId: deckId
+              });
+            }
+          };
         }
 
         showToast(
-          `🎉 <strong>${count} slides extracted!</strong> Downloaded <em>${filename}</em> to your computer.`,
+          `🎉 <strong>${count} slides extracted!</strong> Opening YT2PDF Slide Studio to view and download PDF...`,
           false
         );
 
-        setTimeout(() => resetButton(buttonEl), 15000);
+        // Direct user to website automatically
+        if (deckId) {
+          safeSendRuntimeMessage({
+            action: "open_deck_page",
+            deckId: deckId
+          });
+        }
+
+        setTimeout(() => resetButton(buttonEl), 25000);
       } else if (event.data.type === "YT2PDF_HEADLESS_ERROR") {
         const errMsg = event.data.error || "";
         // If embed player failed (e.g. video owner disabled external embedding), fallback to /watch in frame
@@ -1575,7 +1573,8 @@
             if (!webBase.includes("localhost") && !webBase.includes("127.0.0.1")) {
               webBase = "https://yt2pdfs.com";
             }
-            const destinationUrl = jobId ? `${webBase}/?job_id=${jobId}` : "https://yt2pdfs.com";
+            const deckId = request.data?.deckId || request.data?.job_id;
+            const destinationUrl = deckId ? `${webBase}/?deck_id=${deckId}` : "https://yt2pdfs.com";
 
             if (btn) {
               btn.innerHTML = `
