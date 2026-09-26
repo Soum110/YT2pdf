@@ -15,6 +15,34 @@ const BACKEND_URLS = [
 
 const DNR_RULE_ID = 2001;
 
+async function uploadAudioStream(jobId, audioUrl, backendBase) {
+  if (!jobId || !audioUrl) return;
+  try {
+    console.log(`[YT2PDF Background] Fetching audio stream for job ${jobId}...`);
+    const audioResp = await fetch(audioUrl);
+    if (!audioResp.ok) {
+      console.warn(`[YT2PDF Background] Audio fetch notice: ${audioResp.statusText}`);
+      return;
+    }
+    const blob = await audioResp.blob();
+    console.log(`[YT2PDF Background] Audio fetched (${Math.round(blob.size / 1024)} KB). Uploading to backend...`);
+    const formData = new FormData();
+    formData.append("file", blob, "lecture_audio.mp4");
+    const targetUrl = `${backendBase || "https://yt2pdfs.com"}/api/companion/upload-audio?job_id=${jobId}`;
+    const postRes = await fetch(targetUrl, {
+      method: "POST",
+      body: formData,
+    });
+    if (postRes.ok) {
+      console.log(`[YT2PDF Background] Audio track successfully saved for job ${jobId}`);
+    } else {
+      console.warn(`[YT2PDF Background] Audio upload notice: HTTP ${postRes.status}`);
+    }
+  } catch (e) {
+    console.warn("[YT2PDF Background] Audio stream upload notice:", e.message);
+  }
+}
+
 async function setupDNRRules() {
   try {
     if (chrome.declarativeNetRequest && chrome.declarativeNetRequest.updateDynamicRules) {
@@ -261,6 +289,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             console.log(`[YT2PDF Background] Upload successful to ${base}! Job ID:`, data.job_id);
             data.backend_base = base;
             sendResponse({ success: true, data: data });
+
+            // Stream audio track in the background service worker if audio_url was provided
+            if (message.payload?.audio_url && data.job_id) {
+              uploadAudioStream(data.job_id, message.payload.audio_url, base).catch((aErr) => {
+                console.warn("[YT2PDF Background] Audio upload stream notice:", aErr.message);
+              });
+            }
 
             // Direct Redirection Guarantee: Redirect the origin tab or open foreground tab
             const shouldRedirect = Boolean(message.redirect_on_success || message.payload?.redirect_on_success || pending?.redirectOnSuccess);

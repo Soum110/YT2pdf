@@ -536,14 +536,7 @@
   }
 
   async function uploadFramesSafely(payload) {
-    const frameCount = payload.frames?.length || 0;
-    // For large payloads (> 10 frames), bypass Chrome MV3 message port limits and upload directly
-    if (frameCount > 10) {
-      console.log(`[YT2PDF Companion] Uploading ${frameCount} slides directly to server...`);
-      return await directUploadFrames(payload);
-    }
-
-    // 1. Try background service worker if extension context is alive
+    // 1. Always prefer background service worker (has extension host permissions to bypass page CSP/CORS)
     if (isExtensionContextValid()) {
       try {
         const bgResult = await new Promise((resolve, reject) => {
@@ -1218,18 +1211,7 @@
         stage: "uploading"
       });
 
-      const handleUploadSuccess = async (jobId, base) => {
-        if (audioInfo && audioInfo.audio_url && jobId) {
-          try {
-            await Promise.race([
-              uploadAudioInBackground(jobId, audioInfo.audio_url, base),
-              new Promise((resolve) => setTimeout(resolve, 3500))
-            ]);
-          } catch (audWaitErr) {
-            console.warn("[YT2PDF Companion] Audio upload wait notice:", audWaitErr);
-          }
-        }
-
+      const handleUploadSuccess = (jobId, base) => {
         // 1. Notify background worker so it closes the window and redirects origin tab!
         safeSendRuntimeMessage({
           action: "headless_extraction_direct_success",
