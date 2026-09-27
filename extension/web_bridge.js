@@ -1,13 +1,12 @@
 /**
  * web_bridge.js — YT2PDF Companion Web Bridge
- * Injected on yt2pdfs.com and localhost to allow seamless communication
- * between the web page and the YT2PDF Companion extension.
+ * Injected on yt2pdfs.com and localhost.
  * 
  * Architecture:
- * - Signals extension presence to index.html (sets data-yt2pdf-companion="active").
- * - Delegates extraction requests to background.js (which spawns a muted background tab).
- * - Relays real-time progress and completed presentation decks back to index.html.
- * - Does NOT embed iframes in the present tab.
+ * - 100% Zero-Tab Extraction: Runs slide extraction inside a hidden, offscreen iframe.
+ *   NO new tabs or windows are ever opened in the user's browser.
+ * - Relays real-time progress to index.html.
+ * - Automatically destroys the iframe upon completion or error.
  */
 
 (function () {
@@ -28,21 +27,18 @@
       }
       window.__YT2PDF_COMPANION_ACTIVE__ = true;
 
-      // Broadcast companion availability to page scripts
       window.dispatchEvent(new CustomEvent("YT2PDF_COMPANION_READY", {
-        detail: { version: "1.2.0", active: true }
+        detail: { version: "1.3.0", active: true }
       }));
-      window.postMessage({ type: "YT2PDF_COMPANION_READY", version: "1.2.0", active: true }, "*");
+      window.postMessage({ type: "YT2PDF_COMPANION_READY", version: "1.3.0", active: true }, "*");
     } catch (e) {}
   }
 
-  // Initial announcement
   signalActive();
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", signalActive);
   }
 
-  // Periodic announcement for late-initializing DOM
   let announceCount = 0;
   const announcer = setInterval(() => {
     if (!isExtensionContextValid()) {
@@ -60,11 +56,35 @@
   }, 350);
 
   let isExtracting = false;
-  let currentTaskId = null;
+  let activeExtractorIframe = null;
+  let extractorWatchdog = null;
+
+  function cleanupExtraction() {
+    if (extractorWatchdog) {
+      clearTimeout(extractorWatchdog);
+      extractorWatchdog = null;
+    }
+    if (activeExtractorIframe) {
+      try {
+        activeExtractorIframe.src = "about:blank";
+        activeExtractorIframe.remove();
+      } catch (e) {}
+      activeExtractorIframe = null;
+    }
+    const existing = document.getElementById("yt2pdf-silent-extractor");
+    if (existing) {
+      try {
+        existing.src = "about:blank";
+        existing.remove();
+      } catch (e) {}
+    }
+  }
+
+  cleanupExtraction();
 
   function dispatchResult(detail) {
+    cleanupExtraction();
     isExtracting = false;
-    currentTaskId = null;
     window.dispatchEvent(new CustomEvent("YT2PDF_EXTRACTION_RESULT", { detail }));
     window.postMessage({ type: "YT2PDF_EXTRACTION_RESULT", detail }, "*");
   }
@@ -85,28 +105,48 @@
       return;
     }
 
+    cleanupExtraction();
     isExtracting = true;
-    console.log("[YT2PDF Bridge] Delegating extraction to background service worker for:", videoUrl);
+    console.log("[YT2PDF Bridge] Starting 100% silent in-page iframe extraction for:", videoUrl);
+
+    let videoId = "";
+    try {
+      const u = new URL(videoUrl);
+      if (u.hostname.includes("youtu.be")) {
+        videoId = u.pathname.replace(/^\//, "").split("?")[0];
+      } else if (u.pathname.includes("/shorts/")) {
+        videoId = u.pathname.split("/shorts/")[1]?.split("/")[0];
+      } else if (u.pathname.includes("/embed/")) {
+        videoId = u.pathname.split("/embed/")[1]?.split("?")[0];
+      } else if (u.searchParams.has("v")) {
+        videoId = u.searchParams.get("v");
+      }
+    } catch (e) {}
+
+    if (!videoId) {
+      dispatchResult({ success: false, error: "Invalid YouTube video URL." });
+      return;
+    }
+
+    // Safety watchdog timeout (90s)
+    extractorWatchdog = setTimeout(() => {
+      console.warn("[YT2PDF Bridge] Extraction watchdog timed out.");
+      dispatchResult({
+        success: false,
+        error: "Slide extraction timed out. Please check your internet connection and try again."
+      });
+    }, 90000);
 
     try {
-      chrome.runtime.sendMessage({
-        action: "start_silent_extraction",
-        videoUrl: videoUrl,
-        videoTitle: "Presentation Slides",
-        isWebOrigin: true
-      }, (res) => {
-        if (chrome.runtime.lastError) {
-          dispatchResult({ success: false, error: chrome.runtime.lastError.message });
-          return;
-        }
-        if (res && res.success) {
-          currentTaskId = res.taskId;
-        } else {
-          dispatchResult({ success: false, error: res?.error || "Failed to start background extraction." });
-        }
-      });
+      const frame = document.createElement("iframe");
+      frame.id = "yt2pdf-silent-extractor";
+      frame.src = `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&enablejsapi=1&yt2pdf_headless=1`;
+      frame.style.cssText = "position:fixed;top:-10000px;left:-10000px;width:640px;height:360px;border:none;pointer-events:none;opacity:0;z-index:-9999;";
+      frame.allow = "autoplay 'none'";
+      activeExtractorIframe = frame;
+      document.body.appendChild(frame);
     } catch (e) {
-      dispatchResult({ success: false, error: e.message });
+      dispatchResult({ success: false, error: "Failed to initialize extraction frame: " + e.message });
     }
   }
 
@@ -120,40 +160,36 @@
     }
   });
 
-  // Listen for progress updates & completion messages from background service worker
-  if (isExtensionContextValid() && chrome?.runtime?.onMessage) {
-    chrome.runtime.onMessage.addListener((msg) => {
-      if (msg.action === "extraction_progress_update") {
-        window.dispatchEvent(new CustomEvent("YT2PDF_EXTRACTION_PROGRESS", {
-          detail: {
-            current: msg.current,
-            total: msg.total,
-            statusMsg: msg.statusMsg || ""
-          }
-        }));
-        window.postMessage({
-          type: "YT2PDF_EXTRACTION_PROGRESS",
-          current: msg.current,
-          total: msg.total,
-          statusMsg: msg.statusMsg || ""
-        }, "*");
-      } else if (msg.action === "extraction_finished") {
-        if (msg.success && msg.deck) {
-          dispatchResult({
-            success: true,
-            job_id: msg.deck.deckId,
-            slide_count: msg.deck.slideCount,
-            deck: msg.deck
-          });
-        } else {
-          dispatchResult({
-            success: false,
-            error: msg.error || "Background slide extraction failed."
-          });
-        }
-      }
-    });
-  }
+  // Listen for progress & completion messages from silent iframe
+  window.addEventListener("message", (event) => {
+    if (event.data?.type === "YT2PDF_HEADLESS_PROGRESS") {
+      window.dispatchEvent(new CustomEvent("YT2PDF_EXTRACTION_PROGRESS", {
+        detail: { current: event.data.current, total: event.data.total }
+      }));
+      window.postMessage({
+        type: "YT2PDF_EXTRACTION_PROGRESS",
+        current: event.data.current,
+        total: event.data.total
+      }, "*");
+    } else if (event.data?.type === "YT2PDF_HEADLESS_COMPLETE") {
+      dispatchResult({
+        success: true,
+        job_id: event.data.deck?.deckId,
+        slide_count: event.data.slide_count,
+        deck: event.data.deck
+      });
+    } else if (event.data?.type === "YT2PDF_HEADLESS_ERROR") {
+      cleanupExtraction();
+      dispatchResult({
+        success: false,
+        error: event.data.error || "Slide extraction failed."
+      });
+    } else if (event.data?.type === "YT2PDF_PING") {
+      signalActive();
+      window.dispatchEvent(new CustomEvent("YT2PDF_PONG", { detail: { version: "1.3.0", active: true } }));
+      window.postMessage({ type: "YT2PDF_PONG", version: "1.3.0", active: true }, "*");
+    }
+  });
 
   // ─────────────────────────────────────────────
   // Local Deck Retrieval from Extension Storage
@@ -176,7 +212,6 @@
     }
   }
 
-  // Listen for deck load requests from webpage
   window.addEventListener("YT2PDF_LOAD_DECK", (evt) => {
     loadDeckFromStorage(evt?.detail?.deck_id);
   });
@@ -186,7 +221,6 @@
     }
   });
 
-  // Check URL on initialization for ?deck_id=...
   try {
     const params = new URLSearchParams(window.location.search);
     if (params.has("deck_id")) {
@@ -197,10 +231,9 @@
     }
   } catch (e) {}
 
-  // Respond to ping requests from webpage
   window.addEventListener("YT2PDF_PING", () => {
     signalActive();
-    window.dispatchEvent(new CustomEvent("YT2PDF_PONG", { detail: { version: "1.2.0", active: true } }));
-    window.postMessage({ type: "YT2PDF_PONG", version: "1.2.0", active: true }, "*");
+    window.dispatchEvent(new CustomEvent("YT2PDF_PONG", { detail: { version: "1.3.0", active: true } }));
+    window.postMessage({ type: "YT2PDF_PONG", version: "1.3.0", active: true }, "*");
   });
 })();
