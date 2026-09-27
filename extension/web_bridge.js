@@ -137,17 +137,56 @@
       });
     }, 90000);
 
+    let hasTriedFallback = false;
+
     try {
       const frame = document.createElement("iframe");
       frame.id = "yt2pdf-silent-extractor";
       frame.src = `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&enablejsapi=1&yt2pdf_headless=1`;
       frame.style.cssText = "position:fixed;top:-10000px;left:-10000px;width:640px;height:360px;border:none;pointer-events:none;opacity:0;z-index:-9999;";
-      frame.allow = "autoplay 'none'";
+      frame.allow = "autoplay *; encrypted-media *;";
       activeExtractorIframe = frame;
       document.body.appendChild(frame);
     } catch (e) {
       dispatchResult({ success: false, error: "Failed to initialize extraction frame: " + e.message });
     }
+
+    // Listen for progress & completion messages from silent iframe
+    const onFrameMessage = (event) => {
+      if (event.data?.type === "YT2PDF_HEADLESS_PROGRESS") {
+        window.dispatchEvent(new CustomEvent("YT2PDF_EXTRACTION_PROGRESS", {
+          detail: { current: event.data.current, total: event.data.total }
+        }));
+        window.postMessage({
+          type: "YT2PDF_EXTRACTION_PROGRESS",
+          current: event.data.current,
+          total: event.data.total
+        }, "*");
+      } else if (event.data?.type === "YT2PDF_HEADLESS_COMPLETE") {
+        window.removeEventListener("message", onFrameMessage);
+        dispatchResult({
+          success: true,
+          job_id: event.data.deck?.deckId,
+          slide_count: event.data.slide_count,
+          deck: event.data.deck
+        });
+      } else if (event.data?.type === "YT2PDF_HEADLESS_ERROR") {
+        if (!hasTriedFallback && activeExtractorIframe) {
+          hasTriedFallback = true;
+          console.warn("[YT2PDF Bridge] Embed restricted, falling back to native watch stream in silent frame...");
+          activeExtractorIframe.src = `https://www.youtube.com/watch?v=${videoId}&yt2pdf_headless=1`;
+          return;
+        }
+        window.removeEventListener("message", onFrameMessage);
+        cleanupExtraction();
+        dispatchResult({
+          success: false,
+          error: event.data.error || "Slide extraction failed."
+        });
+      }
+    };
+
+    window.addEventListener("message", onFrameMessage);
   }
 
   // Listen for extraction requests dispatched by index.html
@@ -157,37 +196,6 @@
   window.addEventListener("message", (event) => {
     if (event.data?.type === "YT2PDF_START_EXTRACTION") {
       executeExtraction(event.data.video_url);
-    }
-  });
-
-  // Listen for progress & completion messages from silent iframe
-  window.addEventListener("message", (event) => {
-    if (event.data?.type === "YT2PDF_HEADLESS_PROGRESS") {
-      window.dispatchEvent(new CustomEvent("YT2PDF_EXTRACTION_PROGRESS", {
-        detail: { current: event.data.current, total: event.data.total }
-      }));
-      window.postMessage({
-        type: "YT2PDF_EXTRACTION_PROGRESS",
-        current: event.data.current,
-        total: event.data.total
-      }, "*");
-    } else if (event.data?.type === "YT2PDF_HEADLESS_COMPLETE") {
-      dispatchResult({
-        success: true,
-        job_id: event.data.deck?.deckId,
-        slide_count: event.data.slide_count,
-        deck: event.data.deck
-      });
-    } else if (event.data?.type === "YT2PDF_HEADLESS_ERROR") {
-      cleanupExtraction();
-      dispatchResult({
-        success: false,
-        error: event.data.error || "Slide extraction failed."
-      });
-    } else if (event.data?.type === "YT2PDF_PING") {
-      signalActive();
-      window.dispatchEvent(new CustomEvent("YT2PDF_PONG", { detail: { version: "1.3.0", active: true } }));
-      window.postMessage({ type: "YT2PDF_PONG", version: "1.3.0", active: true }, "*");
     }
   });
 

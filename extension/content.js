@@ -819,6 +819,12 @@
         setTimeout(() => resetButton(buttonEl), 35000);
 
       } else if (event.data.type === "YT2PDF_HEADLESS_ERROR") {
+        if (!hasTriedFallback && activeFrame) {
+          hasTriedFallback = true;
+          console.warn("[YT2PDF] Embed unavailable, trying native watch stream in silent frame...");
+          activeFrame.src = `https://www.youtube.com/watch?v=${videoId}&yt2pdf_headless=1&yt2pdf_duration=${currentDuration}&yt2pdf_title=${encodeURIComponent(videoTitle)}`;
+          return;
+        }
         window.removeEventListener("message", onFrameMessage);
         cleanupExtractionFrame();
         isExtracting = false;
@@ -827,15 +833,17 @@
       }
     };
 
+    let hasTriedFallback = false;
     window.addEventListener("message", onFrameMessage);
 
     // Create 100% silent, offscreen iframe (ZERO browser tabs created)
     try {
       const frame = document.createElement("iframe");
       frame.id = "yt2pdf-extractor-frame";
-      frame.src = `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&enablejsapi=1&yt2pdf_headless=1&yt2pdf_duration=${currentDuration}&yt2pdf_title=${encodeURIComponent(videoTitle)}`;
+      // Try watch URL first on youtube.com to bypass any "playback on other websites disabled" embed restrictions
+      frame.src = `https://www.youtube.com/watch?v=${videoId}&yt2pdf_headless=1&yt2pdf_duration=${currentDuration}&yt2pdf_title=${encodeURIComponent(videoTitle)}`;
       frame.style.cssText = "position:fixed;top:-10000px;left:-10000px;width:640px;height:360px;border:none;pointer-events:none;opacity:0;z-index:-9999;";
-      frame.allow = "autoplay 'none'";
+      frame.allow = "autoplay *; encrypted-media *;";
       activeFrame = frame;
       document.body.appendChild(frame);
     } catch (err) {
