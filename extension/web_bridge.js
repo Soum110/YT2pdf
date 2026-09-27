@@ -65,14 +65,29 @@
       extractorWatchdog = null;
     }
     if (activeExtractorIframe) {
-      try { activeExtractorIframe.remove(); } catch (e) {}
+      try {
+        activeExtractorIframe.src = "about:blank";
+        activeExtractorIframe.remove();
+      } catch (e) {}
       activeExtractorIframe = null;
     }
     const existing = document.getElementById("yt2pdf-silent-extractor");
     if (existing) {
-      try { existing.remove(); } catch (e) {}
+      try {
+        existing.src = "about:blank";
+        existing.remove();
+      } catch (e) {}
     }
+    try {
+      const anyFrames = document.querySelectorAll("iframe#yt2pdf-headless-frame, iframe#yt2pdf-silent-extractor");
+      anyFrames.forEach(f => {
+        try { f.src = "about:blank"; f.remove(); } catch(e) {}
+      });
+    } catch(e) {}
   }
+
+  // Cleanup any lingering ghost frames on startup
+  cleanupExtraction();
 
   function dispatchResult(detail) {
     cleanupExtraction();
@@ -213,14 +228,10 @@
       });
     } else if (event.data?.type === "YT2PDF_HEADLESS_ERROR") {
       const errMsg = event.data.error || "";
-      if (activeExtractorIframe && activeExtractorIframe.src && activeExtractorIframe.src.includes("/embed/") && activeVideoId) {
-        console.warn("[YT2PDF Bridge] Embed player failed, falling back to watch page in silent frame:", errMsg);
-        activeExtractorIframe.src = `https://www.youtube.com/watch?v=${activeVideoId}&autoplay=1&mute=1&yt2pdf_headless=1`;
-        return;
-      }
+      cleanupExtraction();
       dispatchResult({
         success: false,
-        error: errMsg || "Background slide extraction failed."
+        error: "This video has embedding disabled by YouTube or its creator. Please open the video on YouTube and click the 'PDF Slides' button directly on the video page!"
       });
     } else if (event.data?.type === "YT2PDF_PING") {
       signalActive();

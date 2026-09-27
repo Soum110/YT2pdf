@@ -3331,8 +3331,14 @@
       const params = new URLSearchParams(window.location.search);
       if (params.has("deck_id")) {
         const dId = params.get("deck_id");
-        window.dispatchEvent(new CustomEvent("YT2PDF_LOAD_DECK", { detail: { deck_id: dId } }));
-        window.postMessage({ type: "YT2PDF_LOAD_DECK", deck_id: dId }, "*");
+        const fire = () => {
+          window.dispatchEvent(new CustomEvent("YT2PDF_LOAD_DECK", { detail: { deck_id: dId } }));
+          window.postMessage({ type: "YT2PDF_LOAD_DECK", deck_id: dId }, "*");
+        };
+        fire();
+        setTimeout(fire, 300);
+        setTimeout(fire, 800);
+        setTimeout(fire, 1500);
       }
     } catch (e) {}
   }
