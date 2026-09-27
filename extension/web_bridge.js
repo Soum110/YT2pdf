@@ -205,12 +205,31 @@
   function loadDeckFromStorage(deckId) {
     if (!isExtensionContextValid() || !chrome?.storage?.local) return;
     try {
-      const keys = deckId ? [deckId, "latest_deck_id"] : ["latest_deck_id"];
-      chrome.storage.local.get(keys, (res) => {
-        const targetId = deckId || res?.latest_deck_id;
-        const deck = res ? res[targetId] : null;
+      chrome.storage.local.get(null, (res) => {
+        if (!res) return;
+        let deck = null;
+        let targetId = deckId;
+
+        if (targetId && res[targetId] && res[targetId].slides && res[targetId].slides.length > 0) {
+          deck = res[targetId];
+        } else if (res.latest_deck_id && res[res.latest_deck_id] && res[res.latest_deck_id].slides) {
+          targetId = res.latest_deck_id;
+          deck = res[res.latest_deck_id];
+        } else if (res.last_deck_id && res[res.last_deck_id] && res[res.last_deck_id].slides) {
+          targetId = res.last_deck_id;
+          deck = res[res.last_deck_id];
+        } else {
+          // Find any key starting with deck_ with slides
+          const deckKeys = Object.keys(res).filter((k) => k.startsWith("deck_") && res[k]?.slides?.length > 0);
+          if (deckKeys.length > 0) {
+            deckKeys.sort((a, b) => (res[b].createdAt || 0) - (res[a].createdAt || 0));
+            targetId = deckKeys[0];
+            deck = res[targetId];
+          }
+        }
+
         if (deck) {
-          console.log(`[YT2PDF Bridge] Retrieved presentation deck ${targetId} (${deck.slideCount || 0} slides)`);
+          console.log(`[YT2PDF Bridge] Retrieved presentation deck ${targetId} (${deck.slideCount || deck.slides.length || 0} slides)`);
           window.dispatchEvent(new CustomEvent("YT2PDF_CLIENT_DECK_LOADED", { detail: { deck } }));
           window.postMessage({ type: "YT2PDF_CLIENT_DECK_LOADED", deck }, "*");
         }
@@ -233,9 +252,9 @@
     const params = new URLSearchParams(window.location.search);
     if (params.has("deck_id")) {
       const dId = params.get("deck_id");
-      setTimeout(() => loadDeckFromStorage(dId), 150);
-      setTimeout(() => loadDeckFromStorage(dId), 500);
-      setTimeout(() => loadDeckFromStorage(dId), 1200);
+      [50, 200, 500, 1000, 2000, 3500].forEach((ms) => {
+        setTimeout(() => loadDeckFromStorage(dId), ms);
+      });
     }
   } catch (e) {}
 

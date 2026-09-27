@@ -91,7 +91,7 @@
       const lumB = 0.299 * dataB[i] + 0.587 * dataB[i + 1] + 0.114 * dataB[i + 2];
       const d = Math.abs(lumA - lumB);
       totalDiff += d;
-      if (d > 22) {
+      if (d > 18) {
         changedPixels++;
       }
     }
@@ -102,14 +102,9 @@
     const clarityA = computeClarity(canvasA);
     const clarityB = computeClarity(canvasB);
 
-    const isSameSlide = meanDiff < 0.020 && changedRatio < 0.035;
-    const isDistinct = !isSameSlide && (meanDiff >= 0.024 || changedRatio >= 0.040);
-
     return {
       meanDiff,
       changedRatio,
-      isSameSlide,
-      isDistinct,
       clarityA,
       clarityB,
     };
@@ -359,22 +354,27 @@
           else videoId = u.searchParams.get("v") || "";
         } catch (e) {}
 
-        // Smart adaptive sampling: high accuracy, zero slide misses
-        let targetSamples = 35;
-        if (duration < 180) targetSamples = Math.max(12, Math.floor(duration / 8));
-        else if (duration < 600) targetSamples = 22;
-        else if (duration < 1800) targetSamples = 32;
-        else if (duration < 3600) targetSamples = 40;
-        else targetSamples = 50;
+        // Adaptive sampling density tailored for academic & lecture presentations
+        let step = 13;
+        if (duration < 180) {
+          step = 6;
+        } else if (duration < 600) {
+          step = 9;
+        } else if (duration < 1800) {
+          step = 13; // For 21 min (1260s): ~95 sample points across the lecture
+        } else if (duration < 3600) {
+          step = 18;
+        } else {
+          step = 24;
+        }
 
-        let step = Math.max(6, Math.floor(duration / targetSamples));
         const samplePoints = [];
         const startT = Math.max(2, Math.floor(duration * 0.005));
         for (let t = startT; t < duration - 2; t += step) {
           samplePoints.push(t);
         }
-        if (duration > 20 && (!samplePoints.length || samplePoints[samplePoints.length - 1] < duration - 15)) {
-          samplePoints.push(Math.max(2, duration - 10));
+        if (duration > 20 && (!samplePoints.length || samplePoints[samplePoints.length - 1] < duration - 12)) {
+          samplePoints.push(Math.max(2, duration - 8));
         }
 
         // Upscale canvas to 1280x720 with high-quality smoothing for publication-grade slide text
@@ -399,10 +399,16 @@
 
         async function seekToTime(targetTime) {
           const activeVideo = document.querySelector("video.html5-main-video, video") || video;
-          if (!activeVideo) return;
+          if (!activeVideo) return false;
           enforce360pStream();
           handleAdsAndOverlays(activeVideo);
 
+          // Fast path: if video is already within 0.5s of target and not currently seeking
+          if (Math.abs(activeVideo.currentTime - targetTime) < 0.5 && !activeVideo.seeking) {
+            return true;
+          }
+
+          // Trigger YouTube player API seekTo
           try {
             const s = document.createElement("script");
             s.textContent = `
@@ -419,23 +425,36 @@
             s.remove();
           } catch (e) {}
 
-          let onSeeked = null;
+          let seekResolved = false;
           await Promise.race([
             new Promise((resolve) => {
-              onSeeked = () => resolve();
+              const onSeeked = () => {
+                try { activeVideo.removeEventListener("seeked", onSeeked); } catch (e) {}
+                seekResolved = true;
+                resolve();
+              };
               try {
                 activeVideo.addEventListener("seeked", onSeeked, { once: true });
                 activeVideo.currentTime = targetTime;
-              } catch (e) { resolve(); }
+              } catch (e) {
+                resolve();
+              }
             }),
-            unthrottledSleep(280)
-          ]).finally(() => {
-            if (onSeeked && activeVideo) {
-              try { activeVideo.removeEventListener("seeked", onSeeked); } catch (e) {}
-            }
-          });
+            unthrottledSleep(1200)
+          ]);
 
-          await unthrottledSleep(30);
+          // Small delay for the video decoder to render frame into the hardware buffer
+          await unthrottledSleep(40);
+
+          // If the video didn't advance or seeking is still stuck, retry once directly
+          if (activeVideo.seeking || Math.abs(activeVideo.currentTime - targetTime) > 3.0) {
+            try {
+              activeVideo.currentTime = targetTime;
+              await unthrottledSleep(350);
+            } catch (e) {}
+          }
+
+          return true;
         }
 
         // Main extraction loop
@@ -454,6 +473,11 @@
           const currentVideo = document.querySelector("video.html5-main-video, video") || video;
           if (!currentVideo) continue;
 
+          // Verify the video is not stuck on a stale timestamp before capturing
+          if (Math.abs(currentVideo.currentTime - timeTarget) > 3.5 && duration > 30) {
+            await seekToTime(timeTarget);
+          }
+
           thumbCtx.drawImage(currentVideo, 0, 0, 64, 36);
 
           if (capturedSlides.length === 0) {
@@ -462,71 +486,93 @@
             capturedSlides.push({
               timestamp: timeTarget,
               time_formatted: formatTimestamp(timeTarget),
-              data: captureCanvas.toDataURL("image/jpeg", 0.72)
+              data: captureCanvas.toDataURL("image/jpeg", 0.75)
             });
           } else {
             const diffResult = calculateDifference(thumbCanvas, lastCapturedCanvas);
-            if (diffResult.isDistinct) {
+            const lastSlide = capturedSlides[capturedSlides.length - 1];
+            const timeSinceLast = timeTarget - (lastSlide ? lastSlide.timestamp : 0);
+
+            let isDistinct = false;
+            let isSameSlide = false;
+
+            if (timeSinceLast < 8) {
+              // Very short interval: require clear slide change to avoid capturing camera movement / hand gestures
+              isDistinct = diffResult.meanDiff >= 0.022 || diffResult.changedRatio >= 0.032;
+              isSameSlide = !isDistinct && (diffResult.meanDiff < 0.012 && diffResult.changedRatio < 0.020);
+            } else if (timeSinceLast < 25) {
+              // Standard slide interval: catch formula derivations, bullet points, diagram updates
+              isDistinct = diffResult.meanDiff >= 0.010 || diffResult.changedRatio >= 0.015;
+              isSameSlide = !isDistinct && (diffResult.meanDiff < 0.007 && diffResult.changedRatio < 0.010);
+            } else if (timeSinceLast < 60) {
+              // Longer gap: high sensitivity to avoid missing subtle slide updates
+              isDistinct = diffResult.meanDiff >= 0.007 || diffResult.changedRatio >= 0.011;
+              isSameSlide = !isDistinct;
+            } else {
+              // Gap > 60 seconds with no slide: capture any discernible change
+              isDistinct = diffResult.meanDiff >= 0.004 || diffResult.changedRatio >= 0.007;
+              isSameSlide = !isDistinct;
+            }
+
+            if (isDistinct) {
               lastCapturedCtx.drawImage(thumbCanvas, 0, 0, 64, 36);
               captureCtx.drawImage(currentVideo, 0, 0, 1280, 720);
               capturedSlides.push({
                 timestamp: timeTarget,
                 time_formatted: formatTimestamp(timeTarget),
-                data: captureCanvas.toDataURL("image/jpeg", 0.72)
+                data: captureCanvas.toDataURL("image/jpeg", 0.75)
               });
-            } else if (diffResult.isSameSlide && diffResult.clarityA > diffResult.clarityB * 1.05) {
+            } else if (isSameSlide && diffResult.clarityA > diffResult.clarityB * 1.05) {
+              // Sharper resolution of the same slide: upgrade the last captured slide image
               lastCapturedCtx.drawImage(thumbCanvas, 0, 0, 64, 36);
               captureCtx.drawImage(currentVideo, 0, 0, 1280, 720);
               capturedSlides[capturedSlides.length - 1] = {
                 timestamp: timeTarget,
                 time_formatted: formatTimestamp(timeTarget),
-                data: captureCanvas.toDataURL("image/jpeg", 0.72)
+                data: captureCanvas.toDataURL("image/jpeg", 0.75)
               };
             }
           }
         }
 
         // Timeline Gap Safety Net
-        const gaps = [];
-        const gapThreshold = Math.max(60, Math.floor(step * 2.2));
-        if (capturedSlides.length > 0 && duration > 45) {
+        if (capturedSlides.length > 0 && duration > 60) {
+          const gapPoints = [];
           for (let idx = 0; idx < capturedSlides.length - 1; idx++) {
             const tA = capturedSlides[idx].timestamp;
             const tB = capturedSlides[idx + 1].timestamp;
-            if (tB - tA > gapThreshold) {
-              gaps.push(Math.floor((tA + tB) / 2));
+            if (tB - tA > 70) {
+              const mid = Math.floor((tA + tB) / 2);
+              gapPoints.push(mid);
+              if (tB - tA > 150) {
+                gapPoints.push(Math.floor(tA + (tB - tA) * 0.25));
+                gapPoints.push(Math.floor(tA + (tB - tA) * 0.75));
+              }
             }
           }
           const lastTs = capturedSlides[capturedSlides.length - 1].timestamp;
-          if (lastTs < duration - 25) {
-            gaps.push(Math.max(2, duration - 8));
+          if (lastTs < duration - 35) {
+            gapPoints.push(Math.max(2, duration - 12));
           }
-        }
 
-        if (gaps.length > 0 || (capturedSlides.length < 5 && duration > 60)) {
-          const existingTs = new Set(capturedSlides.map((s) => Math.floor(s.timestamp)));
-          const chkPoints = gaps.length > 0 ? gaps.slice(0, 10) : samplePoints.filter((_, idx) => idx % 2 === 0);
-          for (const tPoint of chkPoints) {
-            if (![...existingTs].some((ts) => Math.abs(ts - tPoint) < 10)) {
-              try {
-                await seekToTime(tPoint);
-                const currentVideo = document.querySelector("video.html5-main-video, video") || video;
-                if (currentVideo) {
-                  thumbCtx.drawImage(currentVideo, 0, 0, 64, 36);
-                  const diffResult = calculateDifference(thumbCanvas, lastCapturedCanvas);
-                  if (diffResult.isDistinct || capturedSlides.length < 3) {
-                    lastCapturedCtx.drawImage(thumbCanvas, 0, 0, 64, 36);
-                    captureCtx.drawImage(currentVideo, 0, 0, 1280, 720);
-                    capturedSlides.push({
-                      timestamp: tPoint,
-                      time_formatted: formatTimestamp(tPoint),
-                      data: captureCanvas.toDataURL("image/jpeg", 0.72)
-                    });
-                    existingTs.add(Math.floor(tPoint));
-                  }
+          for (const gp of gapPoints) {
+            try {
+              await seekToTime(gp);
+              const currentVideo = document.querySelector("video.html5-main-video, video") || video;
+              if (currentVideo && !currentVideo.seeking) {
+                thumbCtx.drawImage(currentVideo, 0, 0, 64, 36);
+                const diff = calculateDifference(thumbCanvas, lastCapturedCanvas);
+                if (diff.meanDiff >= 0.006 || diff.changedRatio >= 0.009 || capturedSlides.length < 5) {
+                  lastCapturedCtx.drawImage(thumbCanvas, 0, 0, 64, 36);
+                  captureCtx.drawImage(currentVideo, 0, 0, 1280, 720);
+                  capturedSlides.push({
+                    timestamp: gp,
+                    time_formatted: formatTimestamp(gp),
+                    data: captureCanvas.toDataURL("image/jpeg", 0.75)
+                  });
                 }
-              } catch (e) {}
-            }
+              }
+            } catch (e) {}
           }
           capturedSlides.sort((a, b) => a.timestamp - b.timestamp);
         }
@@ -538,7 +584,7 @@
           capturedSlides.push({
             timestamp: 0,
             time_formatted: "0:00",
-            data: captureCanvas.toDataURL("image/jpeg", 0.72)
+            data: captureCanvas.toDataURL("image/jpeg", 0.75)
           });
         }
 
@@ -564,11 +610,29 @@
           createdAt: Date.now()
         };
 
-        // Save in extension storage
+        // Guaranteed direct persistence into chrome.storage.local before signaling parent
+        if (typeof chrome !== "undefined" && chrome?.storage?.local) {
+          try {
+            await new Promise((resolve) => {
+              chrome.storage.local.set({
+                [deckId]: deckPayload,
+                latest_deck_id: deckId,
+                last_deck_id: deckId
+              }, () => resolve());
+            });
+          } catch (e) {
+            console.warn("[YT2PDF In-Page Extractor] Direct storage set error:", e);
+          }
+        }
+
+        // Also broadcast runtime message to background service worker
         safeSendRuntimeMessage({
           action: "deck_ready",
           deck: deckPayload
         });
+
+        // Small breathing delay to ensure disk write is completely flushed
+        await unthrottledSleep(150);
 
         // Notify parent frame of successful completion
         sendParentMessage({
@@ -786,11 +850,29 @@
         }
       } else if (event.data.type === "YT2PDF_HEADLESS_COMPLETE") {
         window.removeEventListener("message", onFrameMessage);
-        cleanupExtractionFrame();
-        isExtracting = false;
         const count = event.data.slide_count || 1;
-        const deckId = event.data.deck?.deckId;
+        const deck = event.data.deck;
+        const deckId = deck?.deckId;
         const destinationUrl = deckId ? `https://yt2pdfs.com/?deck_id=${deckId}` : "https://yt2pdfs.com";
+
+        // Persist directly to local extension storage from the active tab as guaranteed backup
+        if (typeof chrome !== "undefined" && chrome?.storage?.local && deck && deckId) {
+          try {
+            chrome.storage.local.set({
+              [deckId]: deck,
+              latest_deck_id: deckId,
+              last_deck_id: deckId
+            });
+          } catch (e) {
+            console.warn("[YT2PDF] Mode B direct storage notice:", e);
+          }
+        }
+
+        // Delay iframe destruction by 800ms to allow all background IPC & storage writes to settle cleanly
+        setTimeout(() => {
+          cleanupExtractionFrame();
+          isExtracting = false;
+        }, 800);
 
         if (buttonEl) {
           buttonEl.disabled = false;
@@ -806,6 +888,8 @@
             e.stopPropagation();
             if (deckId) {
               safeSendRuntimeMessage({ action: "open_deck_page", deckId: deckId });
+            } else {
+              window.open(destinationUrl, "_blank");
             }
           };
         }
@@ -816,7 +900,7 @@
           destinationUrl
         );
 
-        setTimeout(() => resetButton(buttonEl), 35000);
+        setTimeout(() => resetButton(buttonEl), 45000);
 
       } else if (event.data.type === "YT2PDF_HEADLESS_ERROR") {
         if (!hasTriedFallback && activeFrame) {

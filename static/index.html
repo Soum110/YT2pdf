@@ -3294,9 +3294,12 @@
     renderSlideCards();
     updateCurationCounts();
 
-    document.getElementById("result-section").style.display = "block";
-    document.getElementById("progress-section").style.display = "none";
-    document.getElementById("error-section").style.display = "none";
+    const resSec = document.getElementById("result-section");
+    if (resSec) resSec.style.display = "block";
+    const progSec = document.getElementById("progress-section");
+    if (progSec) progSec.style.display = "none";
+    const errSec = document.getElementById("error-section");
+    if (errSec) errSec.style.display = "none";
 
     const dlBtn = document.getElementById("dl-slides-btn");
     if (dlBtn) dlBtn.style.display = "inline-flex";
@@ -3311,9 +3314,14 @@
       window.history.replaceState({ path: cleanUrl }, "", cleanUrl);
     } catch (e) {}
 
-    try {
-      document.getElementById("result-section").scrollIntoView({ behavior: "smooth" });
-    } catch(e) {}
+    setTimeout(() => {
+      try {
+        if (resSec) {
+          const topPos = resSec.getBoundingClientRect().top + window.pageYOffset - 20;
+          window.scrollTo({ top: Math.max(0, topPos), behavior: "smooth" });
+        }
+      } catch(e) {}
+    }, 60);
   }
 
   // Listen for deck loaded from companion extension (via web_bridge.js)
@@ -3331,14 +3339,59 @@
       const params = new URLSearchParams(window.location.search);
       if (params.has("deck_id")) {
         const dId = params.get("deck_id");
+
+        // Immediately show loading indicator at the top
+        const progSection = document.getElementById("progress-section");
+        if (progSection) {
+          progSection.style.display = "block";
+          const stLabel = document.getElementById("stage-label");
+          if (stLabel) stLabel.textContent = "Loading Presentation Slides...";
+          const pctLabel = document.getElementById("pct-label");
+          if (pctLabel) pctLabel.textContent = "Ready";
+          const prMsg = document.getElementById("progress-msg");
+          if (prMsg) prMsg.textContent = "Retrieving slides from extension storage...";
+          const prFill = document.getElementById("progress-fill");
+          if (prFill) prFill.style.width = "90%";
+          try {
+            window.scrollTo({ top: progSection.getBoundingClientRect().top + window.pageYOffset - 30, behavior: "instant" });
+          } catch(e) {}
+        }
+
         const fire = () => {
           window.dispatchEvent(new CustomEvent("YT2PDF_LOAD_DECK", { detail: { deck_id: dId } }));
           window.postMessage({ type: "YT2PDF_LOAD_DECK", deck_id: dId }, "*");
         };
         fire();
-        setTimeout(fire, 300);
+        setTimeout(fire, 100);
+        setTimeout(fire, 350);
         setTimeout(fire, 800);
-        setTimeout(fire, 1500);
+        setTimeout(fire, 1800);
+        setTimeout(fire, 3200);
+
+        // Fallback after 6s
+        setTimeout(() => {
+          if (!isLocalExtraction) {
+            const currentParams = new URLSearchParams(window.location.search);
+            const resSec = document.getElementById("result-section");
+            if (resSec && resSec.style.display !== "block" && currentParams.has("deck_id")) {
+              if (progSection) progSection.style.display = "none";
+              const errSec = document.getElementById("error-section");
+              const errTxt = document.getElementById("error-msg");
+              if (errSec && errTxt) {
+                errTxt.innerHTML = `Could not load presentation deck <code>${dId}</code> from extension storage.<br><span style="font-size:12px;color:var(--text-muted);display:block;margin-top:4px;">Please make sure the YT2PDF Companion extension is installed and active, or try extracting slides again from YouTube.</span>`;
+                errSec.style.display = "block";
+                const retryBtn = errSec.querySelector("button");
+                if (retryBtn) {
+                  retryBtn.textContent = "Retry Loading Slides";
+                  retryBtn.onclick = () => {
+                    errSec.style.display = "none";
+                    checkUrlDeck();
+                  };
+                }
+              }
+            }
+          }
+        }, 6000);
       }
     } catch (e) {}
   }
@@ -4071,6 +4124,9 @@
     initCompanionDetection();
     checkUrlDeck();
     const params = new URLSearchParams(window.location.search);
+    if (params.has("deck_id")) {
+      return; // Viewing an extracted slide deck; do not focus input or trigger recent job checks
+    }
     const urlJob = params.get("job_id") || params.get("job");
     if (urlJob) {
       jobId = urlJob;
