@@ -224,7 +224,24 @@
       } catch (e) {}
     }
 
-    // 5. In-video Ad Handler: Auto-skip skippable ads and fast-forward unskippable ads at 16x speed
+    // 5. In-video Ad Detection & Accelerator (True ad detection, zero false positives)
+    function isAdActive() {
+      const player = document.getElementById("movie_player");
+      if (player) {
+        if (player.classList.contains("ad-showing") || player.classList.contains("ad-interrupting")) {
+          return true;
+        }
+        if (typeof player.getAdState === "function" && player.getAdState() === 1) {
+          return true;
+        }
+      }
+      const skipBtn = document.querySelector(".ytp-skip-ad-button, .ytp-ad-skip-button-modern");
+      if (skipBtn && skipBtn.offsetParent !== null) return true;
+      const adText = document.querySelector(".ytp-ad-text");
+      if (adText && adText.offsetParent !== null && (adText.textContent || "").trim().length > 0) return true;
+      return false;
+    }
+
     function handleAdsAndOverlays(videoEl) {
       try {
         // A. Click skip buttons
@@ -242,16 +259,13 @@
         if (consentBtn) { try { consentBtn.click(); } catch (e) {} }
 
         // D. Check if an ad is actively playing
-        const player = document.getElementById("movie_player");
-        const isAdShowing = (player && (player.classList.contains("ad-showing") || player.classList.contains("ad-interrupting"))) ||
-                            document.querySelector(".ad-showing, .ad-interrupting, .ytp-ad-player-overlay") !== null;
+        const adPlaying = isAdActive();
 
-        if (isAdShowing && videoEl) {
+        if (adPlaying && videoEl) {
           // Accelerate through unskippable ad at 16x speed
           videoEl.playbackRate = 16.0;
           videoEl.muted = true;
           videoEl.volume = 0;
-          // Jump to end of ad if allowed
           if (videoEl.duration && !isNaN(videoEl.duration) && videoEl.currentTime < videoEl.duration - 0.2) {
             try { videoEl.currentTime = videoEl.duration - 0.1; } catch (e) {}
           }
@@ -265,13 +279,18 @@
     }
 
     async function runExtractionPipeline() {
-      // Wait for YouTube video player readiness & duration
-      let video = null;
+      // 1. Check if duration was passed directly via URL params
       let resolvedDuration = 0;
+      const pDur = parseInt(urlParams.get("yt2pdf_duration") || "0", 10);
+      if (pDur > 0) {
+        resolvedDuration = pDur;
+      }
+
+      let video = null;
       const waitStart = Date.now();
       let lastBufferingCheck = Date.now();
 
-      while (Date.now() - waitStart < 25000) {
+      while (Date.now() - waitStart < 20000) {
         video = document.querySelector("video.html5-main-video, video");
         enforce360pStream();
         handleAdsAndOverlays(video);
@@ -288,12 +307,9 @@
           return;
         }
 
-        // Try video element duration (ensure it's not the ad's duration)
-        const player = document.getElementById("movie_player");
-        const isAdShowing = (player && player.classList.contains("ad-showing")) ||
-                            document.querySelector(".ad-showing, .ytp-ad-player-overlay") !== null;
+        const adPlaying = isAdActive();
 
-        if (video && !isAdShowing) {
+        if (video && !adPlaying) {
           video.muted = true;
           video.volume = 0;
           video.play().catch(() => {});
@@ -302,7 +318,7 @@
           }
         }
 
-        // Try player UI duration
+        // Try player UI duration if still not known
         if (!resolvedDuration) {
           const timeDur = document.querySelector(".ytp-time-duration")?.textContent?.trim();
           if (timeDur && timeDur.includes(":")) {
@@ -315,23 +331,24 @@
           }
         }
 
-        if (video && resolvedDuration > 0 && !isAdShowing && (video.readyState >= 1 || video.duration > 0)) {
+        // Ready to proceed immediately once video element exists and duration is known
+        if (video && resolvedDuration > 0 && !adPlaying && (video.readyState >= 1 || video.duration > 0)) {
           break;
         }
 
-        // Low connectivity alert if player takes > 15s to start
-        if (Date.now() - waitStart > 15000 && Date.now() - lastBufferingCheck > 5000) {
+        // Low connectivity alert if player takes > 12s to initialize
+        if (Date.now() - waitStart > 12000 && Date.now() - lastBufferingCheck > 4000) {
           lastBufferingCheck = Date.now();
           safeSendRuntimeMessage({
             action: "extraction_progress",
             taskId: taskId,
             current: 0,
             total: 100,
-            statusMsg: "Low connectivity detected: Connecting to YouTube stream..."
+            statusMsg: "Low connectivity: Connecting to video stream..."
           });
         }
 
-        await unthrottledSleep(250);
+        await unthrottledSleep(200);
       }
 
       if (!video || !resolvedDuration) {
@@ -704,7 +721,13 @@
     }, linkUrl ? 14000 : 5500);
   }
 
+  let buttonWatchdog = null;
+
   function resetButton(btn) {
+    if (buttonWatchdog) {
+      clearTimeout(buttonWatchdog);
+      buttonWatchdog = null;
+    }
     if (!btn) btn = document.getElementById("yt2pdf-action-btn");
     if (!btn) return;
     isExtracting = false;
@@ -741,6 +764,7 @@
       return;
     }
 
+    const currentDuration = Math.floor(video.duration);
     const titleEl = document.querySelector("h1.ytd-watch-metadata yt-formatted-string") ||
                     document.querySelector("h1.title yt-formatted-string") ||
                     document.querySelector("h1.title");
@@ -779,11 +803,22 @@
 
     showToast("🚀 Extracting slides silently in background. Your video playback continues uninterrupted!");
 
-    // Delegate extraction to background.js
+    // Safety watchdog: automatically reset button if extraction takes > 90 seconds
+    if (buttonWatchdog) clearTimeout(buttonWatchdog);
+    buttonWatchdog = setTimeout(() => {
+      if (isExtracting) {
+        console.warn("[YT2PDF Watch Tab] Watchdog reached: resetting button.");
+        resetButton(buttonEl);
+        showToast("Slide extraction timed out. Please check your internet connection.", true);
+      }
+    }, 90000);
+
+    // Delegate extraction to background.js with pre-resolved duration
     safeSendRuntimeMessage({
       action: "start_silent_extraction",
       videoUrl: window.location.href,
       videoTitle: videoTitle,
+      videoDuration: currentDuration,
       isWebOrigin: false
     }, (res) => {
       if (res && res.success) {
@@ -813,6 +848,10 @@
           showToast(msg.statusMsg, true);
         }
       } else if (msg.action === "extraction_finished") {
+        if (buttonWatchdog) {
+          clearTimeout(buttonWatchdog);
+          buttonWatchdog = null;
+        }
         isExtracting = false;
         currentExtractionTaskId = null;
 
