@@ -1,117 +1,19 @@
 /**
  * content.js — YT2PDF Slide Companion
- * Injects a native-styled "PDF Slides" button directly into YouTube's action bar
- * and captures clean, high-resolution presentation slides directly from the browser's active player.
+ * Injects a native-styled "PDF Slides" button directly into YouTube's action bar.
  * 
- * 100% In-Page Execution:
- * - ZERO hidden iframes / background streams
- * - ZERO audio leakage
- * - ZERO 0% freezing / offscreen throttling
- * - Direct redirection to YT2PDF Slide Studio for curation and PDF download
+ * Two Operating Modes:
+ * 1. Active Watch Page (user's foreground tab):
+ *    - Leaves user's video playback completely uninterrupted (zero pauses, zero seeks).
+ *    - Launches silent background extraction and receives live % progress updates.
+ * 2. Silent Headless Window (invisible offscreen extraction window):
+ *    - 100% audio muted (zero sound).
+ *    - High-speed frame extraction and slide deduplication.
+ *    - Automatic fail-safe self-destruction (closes immediately on complete/error).
  */
 
 (function () {
-  let isExtracting = false;
-
-  // ─────────────────────────────────────────────
-  // Immediate Ghost Frame & Zombie Stream Killer
-  // ─────────────────────────────────────────────
-  function killGhostFrames() {
-    try {
-      const ghostFrames = document.querySelectorAll(
-        "iframe#yt2pdf-headless-frame, iframe#yt2pdf-silent-extractor, iframe[src*='yt2pdf_headless']"
-      );
-      ghostFrames.forEach(f => {
-        try {
-          f.src = "about:blank";
-          f.remove();
-        } catch (e) {}
-      });
-
-      // Mute and pause any media elements that are not YouTube's main video player
-      const mainVid = document.querySelector("video.html5-main-video");
-      document.querySelectorAll("video, audio").forEach(el => {
-        if (el !== mainVid) {
-          try {
-            el.muted = true;
-            el.volume = 0;
-            el.pause();
-          } catch(e) {}
-        }
-      });
-    } catch (e) {}
-  }
-
-  // Terminate any lingering ghost streams immediately on load
-  killGhostFrames();
-
-  // Never run extraction inside sub-frames or iframes
-  if (window.self !== window.top) {
-    return;
-  }
-
-  // ─────────────────────────────────────────────
-  // Toast Notification
-  // ─────────────────────────────────────────────
-  function showToast(message, isError = false, linkUrl = null) {
-    const existing = document.getElementById("yt2pdf-toast");
-    if (existing) existing.remove();
-
-    const toast = document.createElement("div");
-    toast.id = "yt2pdf-toast";
-    toast.style.cssText = `
-      position: fixed;
-      bottom: 28px;
-      right: 28px;
-      z-index: 9999999;
-      background: ${isError ? "#BA1A1A" : "#1A1A1A"};
-      color: #FFFFFF;
-      border: 1px solid ${isError ? "#FF5449" : "rgba(255, 255, 255, 0.18)"};
-      border-radius: 12px;
-      padding: 13px 18px;
-      font-family: Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 13.5px;
-      font-weight: 500;
-      box-shadow: 0 12px 32px rgba(0,0,0,0.5);
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      animation: yt2pdf-fade-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-      max-width: 460px;
-      line-height: 1.4;
-      ${linkUrl ? "cursor: pointer;" : ""}
-    `;
-
-    toast.innerHTML = `
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="${isError ? '#FFDAD6' : '#FF4D4D'}" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;">
-        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-        <polyline points="14 2 14 8 20 8"></polyline>
-        <line x1="16" y1="13" x2="8" y2="13"></line>
-        <line x1="16" y1="17" x2="8" y2="17"></line>
-        <polyline points="10 9 9 9 8 9"></polyline>
-      </svg>
-      <span>${message}</span>
-    `;
-
-    if (linkUrl) {
-      toast.title = "Click to open YT2PDF Slide Studio in a new tab";
-      toast.addEventListener("click", (e) => {
-        if (e.target && e.target.tagName === "A") return;
-        window.open(linkUrl, "_blank");
-      });
-    }
-
-    document.body.appendChild(toast);
-
-    setTimeout(() => {
-      if (toast && toast.parentNode) {
-        toast.style.transition = "opacity 0.35s ease, transform 0.35s ease";
-        toast.style.opacity = "0";
-        toast.style.transform = "translateY(12px)";
-        setTimeout(() => toast.remove(), 380);
-      }
-    }, linkUrl ? 12000 : 5500);
-  }
+  const isHeadless = new URLSearchParams(window.location.search).get("yt2pdf_headless") === "1";
 
   // ─────────────────────────────────────────────
   // Perceptual Slide Difference & Clarity Scoring
@@ -163,9 +65,7 @@
     const clarityA = computeClarity(canvasA);
     const clarityB = computeClarity(canvasB);
 
-    // Minor jitter or identical background
     const isSameSlide = meanDiff < 0.020 && changedRatio < 0.035;
-    // New distinct slide if mean difference >= 0.024 OR >= 4.0% of canvas changed
     const isDistinct = !isSameSlide && (meanDiff >= 0.024 || changedRatio >= 0.040);
 
     return {
@@ -189,9 +89,16 @@
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
   }
 
-  // ─────────────────────────────────────────────
-  // Extension Messaging Helpers
-  // ─────────────────────────────────────────────
+  function parseISO8601(durationStr) {
+    if (!durationStr) return 0;
+    const match = durationStr.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+    if (!match) return 0;
+    const hours = parseInt(match[1] || 0, 10);
+    const minutes = parseInt(match[2] || 0, 10);
+    const seconds = parseInt(match[3] || 0, 10);
+    return hours * 3600 + minutes * 60 + seconds;
+  }
+
   function isExtensionContextValid() {
     try {
       return Boolean(typeof chrome !== "undefined" && chrome?.runtime && chrome.runtime.id);
@@ -217,6 +124,432 @@
     } catch (e) {
       if (callback) callback({ success: false, error: e.message });
     }
+  }
+
+  // ═════════════════════════════════════════════
+  // MODE 2: SILENT HEADLESS EXTRACTION (Background Window)
+  // ═════════════════════════════════════════════
+  if (isHeadless) {
+    async function runHeadlessExtraction() {
+      console.log("[YT2PDF Headless] Initializing silent background extraction...");
+
+      // 1. Fail-Safe Suicide Watchdog (45s max): Guarantees window is destroyed even on error
+      const suicideTimer = setTimeout(() => {
+        console.warn("[YT2PDF Headless] Suicide watchdog reached 45s. Closing window.");
+        try {
+          safeSendRuntimeMessage({
+            action: "headless_extraction_failed",
+            error: "Extraction timed out in background window."
+          });
+          window.close();
+        } catch (e) {}
+      }, 45000);
+
+      // 2. Enforce 100% Silence: Permanently mute all audio/video elements
+      const silenceMedia = (el) => {
+        try {
+          el.muted = true;
+          el.volume = 0;
+          el.defaultMuted = true;
+        } catch (e) {}
+      };
+      try {
+        document.querySelectorAll("video, audio").forEach(silenceMedia);
+        const silenceObserver = new MutationObserver(() => {
+          document.querySelectorAll("video, audio").forEach(silenceMedia);
+        });
+        silenceObserver.observe(document.documentElement || document.body, { childList: true, subtree: true });
+      } catch (e) {}
+
+      // 3. Spoof document visibility to keep YouTube player actively decoding
+      try {
+        Object.defineProperty(document, "hidden", { get: () => false, configurable: true });
+        Object.defineProperty(document, "visibilityState", { get: () => "visible", configurable: true });
+        Object.defineProperty(document, "webkitVisibilityState", { get: () => "visible", configurable: true });
+        window.dispatchEvent(new Event("visibilitychange"));
+      } catch (e) {}
+
+      // 4. Dedicated inline Web Worker timer (unthrottled by background policies)
+      let unthrottledSleep = (ms) => new Promise(r => setTimeout(r, ms));
+      try {
+        let workerActive = false;
+        const workerBlob = new Blob([
+          "self.onmessage = function(e) { setTimeout(function() { self.postMessage(e.data); }, e.data.ms); };"
+        ], { type: "application/javascript" });
+        const timerWorker = new Worker(URL.createObjectURL(workerBlob));
+        timerWorker.onerror = () => { workerActive = false; };
+        workerActive = true;
+        unthrottledSleep = function(ms) {
+          return new Promise((resolve) => {
+            let settled = false;
+            const finish = () => { if (!settled) { settled = true; resolve(); } };
+            setTimeout(finish, ms);
+            if (workerActive) {
+              const id = Math.random();
+              const handler = (e) => {
+                if (e.data && e.data.id === id) {
+                  timerWorker.removeEventListener("message", handler);
+                  finish();
+                }
+              };
+              timerWorker.addEventListener("message", handler);
+              try { timerWorker.postMessage({ id, ms }); } catch(e) { finish(); }
+            }
+          });
+        };
+      } catch (e) {}
+
+      // 5. Dismiss overlays & skip ads
+      function dismissOverlaysAndSkipAds(videoEl) {
+        try {
+          const skipBtns = document.querySelectorAll(".ytp-skip-ad-button, .ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-ad-skip-button-container button");
+          skipBtns.forEach(btn => { try { btn.click(); } catch(e) {} });
+          const bannerBtns = document.querySelectorAll(".ytp-ad-overlay-close-button, .ytp-ad-overlay-close-container");
+          bannerBtns.forEach(btn => { try { btn.click(); } catch(e) {} });
+          const consentBtn = document.querySelector("ytd-button-renderer#confirm-button button, .yt-confirm-dialog-renderer #confirm-button button");
+          if (consentBtn) { try { consentBtn.click(); } catch(e) {} }
+        } catch (e) {}
+      }
+
+      // 6. Wait for YouTube video player readiness & duration
+      let video = null;
+      let resolvedDuration = 0;
+      const waitStart = Date.now();
+
+      while (Date.now() - waitStart < 12000) {
+        video = document.querySelector("video.html5-main-video, video");
+        dismissOverlaysAndSkipAds(video);
+
+        // Check for YouTube fatal error
+        const errorScreen = document.querySelector(".ytp-error");
+        if (errorScreen && errorScreen.offsetParent !== null) {
+          const errReason = errorScreen.querySelector(".ytp-error-content-reason")?.textContent?.trim() || "Video unavailable";
+          safeSendRuntimeMessage({
+            action: "headless_extraction_failed",
+            error: `YouTube error: ${errReason}`
+          });
+          clearTimeout(suicideTimer);
+          window.close();
+          return;
+        }
+
+        // Try duration from URL param
+        if (!resolvedDuration) {
+          const pDur = new URLSearchParams(window.location.search).get("yt2pdf_duration");
+          if (pDur && !isNaN(parseInt(pDur, 10)) && parseInt(pDur, 10) > 0) {
+            resolvedDuration = parseInt(pDur, 10);
+          }
+        }
+
+        // Try video element duration & kickstart muted playback
+        if (video) {
+          video.muted = true;
+          video.volume = 0;
+          video.play().catch(() => {});
+          if (!resolvedDuration && video.duration && !isNaN(video.duration) && video.duration > 0) {
+            resolvedDuration = Math.floor(video.duration);
+          }
+        }
+
+        // Try player UI duration
+        if (!resolvedDuration) {
+          const timeDur = document.querySelector(".ytp-time-duration")?.textContent?.trim();
+          if (timeDur && timeDur.includes(":")) {
+            const parts = timeDur.split(":").map(Number);
+            if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+              resolvedDuration = parts[0] * 60 + parts[1];
+            } else if (parts.length === 3 && !isNaN(parts[0]) && !isNaN(parts[1]) && !isNaN(parts[2])) {
+              resolvedDuration = parts[0] * 3600 + parts[1] * 60 + parts[2];
+            }
+          }
+        }
+
+        if (video && resolvedDuration > 0 && (video.readyState >= 1 || video.duration > 0)) {
+          break;
+        }
+        await unthrottledSleep(200);
+      }
+
+      if (!video || !resolvedDuration) {
+        console.warn("[YT2PDF Headless] Video element or duration not ready after 12s.");
+        safeSendRuntimeMessage({
+          action: "headless_extraction_failed",
+          error: "Unable to load YouTube video stream in background."
+        });
+        clearTimeout(suicideTimer);
+        window.close();
+        return;
+      }
+
+      // Enforce muted state
+      video.muted = true;
+      video.volume = 0;
+      try { await video.play().catch(() => {}); } catch(e) {}
+
+      // Wait briefly for video stream decode readiness
+      const readyStart = Date.now();
+      while (Date.now() - readyStart < 3000) {
+        if (video && (video.readyState >= 2 || video.videoWidth > 0)) break;
+        await unthrottledSleep(150);
+      }
+
+      try {
+        const duration = resolvedDuration;
+        const titleEl = document.querySelector("h1.ytd-watch-metadata yt-formatted-string") ||
+                        document.querySelector("h1.title yt-formatted-string") ||
+                        document.querySelector("h1.title");
+        let videoTitle = titleEl ? (titleEl.innerText || "").trim() : document.title.replace(" - YouTube", "").trim();
+        if (!videoTitle) {
+          const urlTitle = new URLSearchParams(window.location.search).get("yt2pdf_title");
+          if (urlTitle) videoTitle = decodeURIComponent(urlTitle);
+        }
+        if (!videoTitle) videoTitle = "Presentation Slides";
+
+        let videoId = "";
+        try {
+          const u = new URL(window.location.href);
+          videoId = u.searchParams.get("v") || "";
+        } catch(e) {}
+
+        // Smart adaptive sampling: high accuracy, zero slide misses
+        let targetSamples = 35;
+        if (duration < 180) targetSamples = Math.max(12, Math.floor(duration / 8));
+        else if (duration < 600) targetSamples = 22;
+        else if (duration < 1800) targetSamples = 32;
+        else if (duration < 3600) targetSamples = 40;
+        else targetSamples = 50;
+
+        let step = Math.max(6, Math.floor(duration / targetSamples));
+        const samplePoints = [];
+        const startT = Math.max(2, Math.floor(duration * 0.005));
+        for (let t = startT; t < duration - 2; t += step) {
+          samplePoints.push(t);
+        }
+        if (duration > 20 && (!samplePoints.length || samplePoints[samplePoints.length - 1] < duration - 15)) {
+          samplePoints.push(Math.max(2, duration - 10));
+        }
+
+        const captureCanvas = document.createElement("canvas");
+        captureCanvas.width = 1280;
+        captureCanvas.height = 720;
+        const captureCtx = captureCanvas.getContext("2d");
+
+        const thumbCanvas = document.createElement("canvas");
+        thumbCanvas.width = 64;
+        thumbCanvas.height = 36;
+        const thumbCtx = thumbCanvas.getContext("2d");
+
+        const lastCapturedCanvas = document.createElement("canvas");
+        lastCapturedCanvas.width = 64;
+        lastCapturedCanvas.height = 36;
+        const lastCapturedCtx = lastCapturedCanvas.getContext("2d");
+
+        const capturedSlides = [];
+
+        async function seekToTime(targetTime) {
+          const activeVideo = document.querySelector("video.html5-main-video, video") || video;
+          if (!activeVideo) return;
+          dismissOverlaysAndSkipAds(activeVideo);
+
+          let onSeeked = null;
+          await Promise.race([
+            new Promise((resolve) => {
+              onSeeked = () => resolve();
+              try {
+                activeVideo.addEventListener("seeked", onSeeked, { once: true });
+                activeVideo.currentTime = targetTime;
+              } catch(e) { resolve(); }
+            }),
+            unthrottledSleep(280)
+          ]).finally(() => {
+            if (onSeeked && activeVideo) {
+              try { activeVideo.removeEventListener("seeked", onSeeked); } catch(e) {}
+            }
+          });
+
+          await unthrottledSleep(30);
+        }
+
+        for (let i = 0; i < samplePoints.length; i++) {
+          const timeTarget = samplePoints[i];
+
+          // Forward progress update to active tab
+          safeSendRuntimeMessage({
+            action: "headless_progress",
+            current: i + 1,
+            total: samplePoints.length
+          });
+
+          await seekToTime(timeTarget);
+
+          const currentVideo = document.querySelector("video.html5-main-video, video") || video;
+          if (!currentVideo) continue;
+
+          thumbCtx.drawImage(currentVideo, 0, 0, 64, 36);
+
+          if (capturedSlides.length === 0) {
+            lastCapturedCtx.drawImage(thumbCanvas, 0, 0, 64, 36);
+            captureCtx.drawImage(currentVideo, 0, 0, 1280, 720);
+            capturedSlides.push({
+              timestamp: timeTarget,
+              time_formatted: formatTimestamp(timeTarget),
+              data: captureCanvas.toDataURL("image/jpeg", 0.72)
+            });
+          } else {
+            const diffResult = calculateDifference(thumbCanvas, lastCapturedCanvas);
+            if (diffResult.isDistinct) {
+              lastCapturedCtx.drawImage(thumbCanvas, 0, 0, 64, 36);
+              captureCtx.drawImage(currentVideo, 0, 0, 1280, 720);
+              capturedSlides.push({
+                timestamp: timeTarget,
+                time_formatted: formatTimestamp(timeTarget),
+                data: captureCanvas.toDataURL("image/jpeg", 0.72)
+              });
+            } else if (diffResult.isSameSlide && diffResult.clarityA > diffResult.clarityB * 1.05) {
+              lastCapturedCtx.drawImage(thumbCanvas, 0, 0, 64, 36);
+              captureCtx.drawImage(currentVideo, 0, 0, 1280, 720);
+              capturedSlides[capturedSlides.length - 1] = {
+                timestamp: timeTarget,
+                time_formatted: formatTimestamp(timeTarget),
+                data: captureCanvas.toDataURL("image/jpeg", 0.72)
+              };
+            }
+          }
+        }
+
+        if (capturedSlides.length === 0) {
+          const currentVideo = document.querySelector("video.html5-main-video, video") || video;
+          if (currentVideo) captureCtx.drawImage(currentVideo, 0, 0, 1280, 720);
+          capturedSlides.push({
+            timestamp: 0,
+            time_formatted: "0:00",
+            data: captureCanvas.toDataURL("image/jpeg", 0.72)
+          });
+        }
+
+        console.log(`[YT2PDF Headless] Extraction complete: ${capturedSlides.length} slides.`);
+
+        // Build presentation deck
+        const deckId = `deck_${Date.now()}`;
+        const deckPayload = {
+          deckId: deckId,
+          videoTitle: videoTitle,
+          videoId: videoId,
+          videoUrl: `https://www.youtube.com/watch?v=${videoId}`,
+          slideCount: capturedSlides.length,
+          slides: capturedSlides.map((s, idx) => ({
+            index: idx + 1,
+            filename: `slide_${idx + 1}.jpg`,
+            timestamp_sec: s.timestamp,
+            timestamp_str: s.time_formatted || formatTimestamp(s.timestamp),
+            title: `Slide ${idx + 1}`,
+            image_url: s.data,
+            data: s.data
+          })),
+          createdAt: Date.now()
+        };
+
+        // Notify background service worker of completion
+        safeSendRuntimeMessage({
+          action: "headless_extraction_complete",
+          deck: deckPayload,
+          slideCount: capturedSlides.length
+        });
+
+        // Fail-Safe: Clear suicide timer and immediately close the background window
+        clearTimeout(suicideTimer);
+        setTimeout(() => {
+          try { window.close(); } catch(e) {}
+        }, 100);
+
+      } catch (err) {
+        console.error("[YT2PDF Headless] Extraction error:", err);
+        safeSendRuntimeMessage({
+          action: "headless_extraction_failed",
+          error: err.message || "Extraction error in background window"
+        });
+        clearTimeout(suicideTimer);
+        window.close();
+      }
+    }
+
+    runHeadlessExtraction();
+    return; // Stop here; do not run watch-page UI scripts in headless window
+  }
+
+  // ═════════════════════════════════════════════
+  // MODE 1: ACTIVE WATCH PAGE (User's Foreground Tab)
+  // ═════════════════════════════════════════════
+
+  // Never run UI scripts inside sub-frames or iframes
+  if (window.self !== window.top) {
+    return;
+  }
+
+  let isExtracting = false;
+  let currentDeckUrl = null;
+
+  // ─────────────────────────────────────────────
+  // Toast Notification
+  // ─────────────────────────────────────────────
+  function showToast(message, isError = false, linkUrl = null) {
+    const existing = document.getElementById("yt2pdf-toast");
+    if (existing) existing.remove();
+
+    const toast = document.createElement("div");
+    toast.id = "yt2pdf-toast";
+    toast.style.cssText = `
+      position: fixed;
+      bottom: 28px;
+      right: 28px;
+      z-index: 9999999;
+      background: ${isError ? "#BA1A1A" : "#1A1A1A"};
+      color: #FFFFFF;
+      border: 1px solid ${isError ? "#FF5449" : "rgba(255, 255, 255, 0.18)"};
+      border-radius: 12px;
+      padding: 13px 18px;
+      font-family: Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 13.5px;
+      font-weight: 500;
+      box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      animation: yt2pdf-fade-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      max-width: 460px;
+      line-height: 1.4;
+      ${linkUrl ? "cursor: pointer;" : ""}
+    `;
+
+    toast.innerHTML = `
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="${isError ? '#FFDAD6' : '#FF4D4D'}" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+        <polyline points="14 2 14 8 20 8"></polyline>
+        <line x1="16" y1="13" x2="8" y2="13"></line>
+        <line x1="16" y1="17" x2="8" y2="17"></line>
+        <polyline points="10 9 9 9 8 9"></polyline>
+      </svg>
+      <span>${message}</span>
+    `;
+
+    if (linkUrl) {
+      toast.title = "Click to open Slide Studio in a new tab";
+      toast.addEventListener("click", (e) => {
+        if (e.target && e.target.tagName === "A") return;
+        window.open(linkUrl, "_blank");
+      });
+    }
+
+    document.body.appendChild(toast);
+
+    setTimeout(() => {
+      if (toast && toast.parentNode) {
+        toast.style.transition = "opacity 0.35s ease, transform 0.35s ease";
+        toast.style.opacity = "0";
+        toast.style.transform = "translateY(12px)";
+        setTimeout(() => toast.remove(), 380);
+      }
+    }, linkUrl ? 12000 : 5500);
   }
 
   // ─────────────────────────────────────────────
@@ -247,11 +580,11 @@
   }
 
   // ─────────────────────────────────────────────
-  // 100% In-Page Direct Slide Extraction (Zero Ghost Streams)
+  // Trigger Silent Background Extraction (Active Video Remains 100% Intact)
   // ─────────────────────────────────────────────
-  async function startSlideExtraction(buttonEl) {
+  function startSlideExtraction(buttonEl) {
     if (isExtracting) {
-      showToast("Slide extraction is already in progress!");
+      showToast("Slide extraction is already in progress silently in the background!");
       return;
     }
 
@@ -262,19 +595,9 @@
     }
 
     isExtracting = true;
-    killGhostFrames(); // Guarantee no ghost frames exist
 
-    // 1. Preserve original playback state
-    const originalTime = video.currentTime;
-    const wasPaused = video.paused;
-    const wasMuted = video.muted;
-    const originalPlaybackRate = video.playbackRate;
-
-    // 2. Pause and mute immediately to prevent any audio glitch during seek loop
-    try {
-      video.pause();
-      video.muted = true;
-    } catch (e) {}
+    // DO NOT touch or seek the active video player!
+    // The user's active playback continues 100% uninterrupted.
 
     const currentDuration = Math.floor(video.duration);
     const titleEl = document.querySelector("h1.ytd-watch-metadata yt-formatted-string") ||
@@ -296,6 +619,13 @@
       }
     }
 
+    if (!videoId) {
+      isExtracting = false;
+      showToast("Could not determine YouTube video ID.", true);
+      resetButton(buttonEl);
+      return;
+    }
+
     if (buttonEl) {
       buttonEl.disabled = true;
       buttonEl.style.opacity = "0.9";
@@ -305,211 +635,22 @@
       `;
     }
 
-    showToast("🚀 Scanning presentation slides directly in high resolution...");
+    showToast("🚀 Extracting slides silently in background. You can keep watching your video!");
 
-    // 3. Smart adaptive sampling: high accuracy, zero slide misses
-    let targetSamples = 40;
-    if (currentDuration < 180) targetSamples = Math.max(12, Math.floor(currentDuration / 8));
-    else if (currentDuration < 600) targetSamples = 25;
-    else if (currentDuration < 1800) targetSamples = 35;
-    else if (currentDuration < 3600) targetSamples = 45;
-    else targetSamples = 55;
+    // Delegate extraction to background service worker (runs in silent background window)
+    safeSendRuntimeMessage({
+      action: "start_background_extraction",
+      videoId: videoId,
+      videoTitle: videoTitle,
+      duration: currentDuration
+    });
 
-    let step = Math.max(6, Math.floor(currentDuration / targetSamples));
-    const samplePoints = [];
-    const startT = Math.max(2, Math.floor(currentDuration * 0.005));
-    for (let t = startT; t < currentDuration - 2; t += step) {
-      samplePoints.push(t);
-    }
-    if (currentDuration > 20 && (!samplePoints.length || samplePoints[samplePoints.length - 1] < currentDuration - 15)) {
-      samplePoints.push(Math.max(2, currentDuration - 10));
-    }
-
-    const captureCanvas = document.createElement("canvas");
-    captureCanvas.width = 1280;
-    captureCanvas.height = 720;
-    const captureCtx = captureCanvas.getContext("2d");
-
-    const thumbCanvas = document.createElement("canvas");
-    thumbCanvas.width = 64;
-    thumbCanvas.height = 36;
-    const thumbCtx = thumbCanvas.getContext("2d");
-
-    const lastCapturedCanvas = document.createElement("canvas");
-    lastCapturedCanvas.width = 64;
-    lastCapturedCanvas.height = 36;
-    const lastCapturedCtx = lastCapturedCanvas.getContext("2d");
-
-    const capturedSlides = [];
-
-    // Hardware-accelerated frame seeking with watchdog
-    async function seekFrame(targetTime) {
-      await new Promise((resolve) => {
-        let settled = false;
-        const finish = () => {
-          if (!settled) {
-            settled = true;
-            resolve();
-          }
-        };
-        const timer = setTimeout(finish, 320); // 320ms safety watchdog
-
-        const onSeeked = () => {
-          video.removeEventListener("seeked", onSeeked);
-          clearTimeout(timer);
-          finish();
-        };
-        video.addEventListener("seeked", onSeeked, { once: true });
-
-        if (typeof video.requestVideoFrameCallback === "function") {
-          video.requestVideoFrameCallback(() => {
-            video.removeEventListener("seeked", onSeeked);
-            clearTimeout(timer);
-            finish();
-          });
-        }
-
-        try {
-          video.currentTime = targetTime;
-        } catch(e) {
-          finish();
-        }
-      });
-    }
-
-    try {
-      for (let i = 0; i < samplePoints.length; i++) {
-        const t = samplePoints[i];
-        const pct = Math.min(99, Math.round(((i + 1) / samplePoints.length) * 100));
-
-        if (buttonEl) {
-          buttonEl.innerHTML = `
-            <svg class="yt2pdf-spinner" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
-            <span>${pct}%</span>
-          `;
-        }
-
-        await seekFrame(t);
-
-        thumbCtx.drawImage(video, 0, 0, 64, 36);
-
-        if (capturedSlides.length === 0) {
-          lastCapturedCtx.drawImage(thumbCanvas, 0, 0, 64, 36);
-          captureCtx.drawImage(video, 0, 0, 1280, 720);
-          capturedSlides.push({
-            timestamp: t,
-            time_formatted: formatTimestamp(t),
-            data: captureCanvas.toDataURL("image/jpeg", 0.72)
-          });
-        } else {
-          const diffResult = calculateDifference(thumbCanvas, lastCapturedCanvas);
-          if (diffResult.isDistinct) {
-            lastCapturedCtx.drawImage(thumbCanvas, 0, 0, 64, 36);
-            captureCtx.drawImage(video, 0, 0, 1280, 720);
-            capturedSlides.push({
-              timestamp: t,
-              time_formatted: formatTimestamp(t),
-              data: captureCanvas.toDataURL("image/jpeg", 0.72)
-            });
-          } else if (diffResult.isSameSlide && diffResult.clarityA > diffResult.clarityB * 1.05) {
-            // Instructor movement or slide uncovered: update with clearer frame
-            lastCapturedCtx.drawImage(thumbCanvas, 0, 0, 64, 36);
-            captureCtx.drawImage(video, 0, 0, 1280, 720);
-            capturedSlides[capturedSlides.length - 1] = {
-              timestamp: t,
-              time_formatted: formatTimestamp(t),
-              data: captureCanvas.toDataURL("image/jpeg", 0.72)
-            };
-          }
-        }
+    // Safety watchdog for UI button (reset if no response in 55s)
+    setTimeout(() => {
+      if (isExtracting) {
+        resetButton(buttonEl);
       }
-
-      // Guarantee at least 1 slide
-      if (capturedSlides.length === 0) {
-        captureCtx.drawImage(video, 0, 0, 1280, 720);
-        capturedSlides.push({
-          timestamp: 0,
-          time_formatted: "0:00",
-          data: captureCanvas.toDataURL("image/jpeg", 0.72)
-        });
-      }
-
-      // 4. Restore original playback position and state immediately
-      try {
-        video.currentTime = originalTime;
-        video.playbackRate = originalPlaybackRate;
-        video.muted = wasMuted;
-        if (!wasPaused) {
-          video.play().catch(() => {});
-        }
-      } catch (e) {}
-
-      // 5. Package presentation deck
-      const deckId = `deck_${Date.now()}`;
-      const deckPayload = {
-        deckId: deckId,
-        videoTitle: videoTitle,
-        videoId: videoId,
-        videoUrl: window.location.href,
-        slideCount: capturedSlides.length,
-        slides: capturedSlides.map((s, idx) => ({
-          index: idx + 1,
-          filename: `slide_${idx + 1}.jpg`,
-          timestamp_sec: s.timestamp,
-          timestamp_str: s.time_formatted || formatTimestamp(s.timestamp),
-          title: `Slide ${idx + 1}`,
-          image_url: s.data,
-          data: s.data
-        })),
-        createdAt: Date.now()
-      };
-
-      // 6. Save in extension local storage
-      safeSendRuntimeMessage({
-        action: "deck_ready",
-        deck: deckPayload
-      });
-
-      // 7. Update button state
-      if (buttonEl) {
-        buttonEl.disabled = false;
-        buttonEl.style.opacity = "1";
-        buttonEl.style.cursor = "pointer";
-        buttonEl.innerHTML = `
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2BA640" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-          <span>View Slides (${capturedSlides.length}) &rarr;</span>
-        `;
-        buttonEl.title = `Extracted ${capturedSlides.length} slides. Click to open in YT2PDF Slide Studio!`;
-        buttonEl.onclick = (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          safeSendRuntimeMessage({ action: "open_deck_page", deckId: deckId });
-        };
-      }
-
-      showToast(`🎉 <strong>${capturedSlides.length} slides extracted!</strong> Opening YT2PDF Slide Studio to view and download PDF...`);
-
-      // 8. Direct user to website Slide Studio
-      safeSendRuntimeMessage({
-        action: "open_deck_page",
-        deckId: deckId
-      });
-
-      setTimeout(() => resetButton(buttonEl), 25000);
-
-    } catch (err) {
-      console.error("[YT2PDF Companion] In-page extraction error:", err);
-      try {
-        video.currentTime = originalTime;
-        video.playbackRate = originalPlaybackRate;
-        video.muted = wasMuted;
-        if (!wasPaused) video.play().catch(() => {});
-      } catch (e) {}
-      showToast("Slide extraction failed: " + (err.message || "Unknown error"), true);
-      resetButton(buttonEl);
-    } finally {
-      isExtracting = false;
-    }
+    }, 55000);
   }
 
   // ─────────────────────────────────────────────
@@ -625,32 +766,88 @@
   // Watch for page navigation and inject button
   setInterval(injectButton, 1000);
   window.addEventListener("yt-navigate-finish", () => {
-    killGhostFrames();
     isExtracting = false;
     injectButton();
   });
   window.addEventListener("spfdone", () => {
-    killGhostFrames();
     isExtracting = false;
     injectButton();
   });
   window.addEventListener("popstate", () => {
-    killGhostFrames();
     isExtracting = false;
     injectButton();
   });
 
-  // Handle messages from popup or background worker
+  // Listen for progress updates & completion messages from background service worker
   if (isExtensionContextValid() && chrome?.runtime?.onMessage) {
     try {
       chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+        // Trigger from popup
         if (request.action === "extract_slides") {
           const btn = document.getElementById("yt2pdf-action-btn") || document.createElement("button");
           startSlideExtraction(btn);
-          try {
-            sendResponse({ started: true });
-          } catch (e) {}
+          try { sendResponse({ started: true }); } catch (e) {}
         }
+
+        // Live progress from silent background extraction
+        if (request.action === "extraction_progress_update") {
+          const btn = document.getElementById("yt2pdf-action-btn");
+          if (btn && request.total) {
+            const pct = Math.min(99, Math.round((request.current / request.total) * 100));
+            btn.innerHTML = `
+              <svg class="yt2pdf-spinner" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
+              <span>${pct}%</span>
+            `;
+          }
+        }
+
+        // Extraction finished: update button and open Slide Studio
+        if (request.action === "extraction_finished") {
+          const btn = document.getElementById("yt2pdf-action-btn");
+          isExtracting = false;
+
+          if (request.success) {
+            const count = request.data?.slideCount || 1;
+            const deckId = request.data?.deckId;
+            const destinationUrl = request.data?.url || (deckId ? `https://yt2pdfs.com/?deck_id=${deckId}` : "https://yt2pdfs.com");
+            currentDeckUrl = destinationUrl;
+
+            if (btn) {
+              btn.disabled = false;
+              btn.style.opacity = "1";
+              btn.style.cursor = "pointer";
+              btn.innerHTML = `
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2BA640" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <span>View Slides (${count}) &rarr;</span>
+              `;
+              btn.title = `Extracted ${count} slides. Click to open in YT2PDF Slide Studio!`;
+              btn.onclick = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (deckId) {
+                  safeSendRuntimeMessage({ action: "open_deck_page", deckId: deckId });
+                } else if (currentDeckUrl) {
+                  window.open(currentDeckUrl, "_blank");
+                }
+              };
+            }
+
+            showToast(
+              `🎉 <strong>${count} slides extracted!</strong> Opening YT2PDF Slide Studio to view and download PDF...`,
+              false,
+              destinationUrl
+            );
+
+            setTimeout(() => resetButton(btn), 30000);
+          } else {
+            if (btn) {
+              btn.innerHTML = `<span>Failed</span>`;
+            }
+            showToast("Slide extraction could not be completed for this video.", true);
+            setTimeout(() => resetButton(btn), 3500);
+          }
+        }
+
         return true;
       });
     } catch (e) {}
