@@ -36,6 +36,17 @@ function resolveTargetBase(tabs) {
 // ─────────────────────────────────────────────
 function purgeOrphanedHeadlessWindows() {
   try {
+    if (chrome.tabs && chrome.tabs.query) {
+      chrome.tabs.query({}, (tabs) => {
+        if (chrome.runtime.lastError || !tabs) return;
+        for (const tab of tabs) {
+          if (tab.url && tab.url.includes("yt2pdf_headless=1")) {
+            console.log(`[YT2PDF Background] Purging orphaned headless tab ${tab.id}`);
+            try { chrome.tabs.remove(tab.id).catch(() => {}); } catch (e) {}
+          }
+        }
+      });
+    }
     if (chrome.windows && chrome.windows.getAll) {
       chrome.windows.getAll({ populate: true }, (windows) => {
         if (chrome.runtime.lastError || !windows) return;
@@ -43,8 +54,8 @@ function purgeOrphanedHeadlessWindows() {
           for (const tab of (win.tabs || [])) {
             if (tab.url && tab.url.includes("yt2pdf_headless=1")) {
               console.log(`[YT2PDF Background] Purging orphaned headless window ${win.id} / tab ${tab.id}`);
-              try { chrome.windows.remove(win.id); } catch (e) {}
-              try { chrome.tabs.remove(tab.id); } catch (e) {}
+              try { chrome.windows.remove(win.id).catch(() => {}); } catch (e) {}
+              try { chrome.tabs.remove(tab.id).catch(() => {}); } catch (e) {}
             }
           }
         }
@@ -133,13 +144,13 @@ function cleanupExtraction(identifier, error = null, resultData = null) {
     item = activeExtractions.get(identifier);
   } else {
     for (const [k, v] of activeExtractions.entries()) {
-      if (k === identifier || v.tabId === identifier || v.windowId === identifier || `win_${v.windowId}` === identifier) {
+      if (k === identifier || v.originTabId === identifier || v.tabId === identifier || v.windowId === identifier || `win_${v.windowId}` === identifier) {
         item = v;
         break;
       }
     }
   }
-  if (!item && activeExtractions.size > 0) {
+  if (!item && activeExtractions.size > 0 && !identifier) {
     item = activeExtractions.values().next().value;
   }
   if (!item) return;
@@ -225,7 +236,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       watchdog: null
     };
 
-    const targetUrl = `https://www.youtube.com/watch?v=${videoId}&yt2pdf_headless=1&yt2pdf_duration=${duration}&yt2pdf_title=${encodeURIComponent(videoTitle)}`;
+    const targetUrl = `https://www.youtube.com/watch?v=${videoId}&yt2pdf_headless=1&yt2pdf_duration=${duration}&yt2pdf_title=${encodeURIComponent(videoTitle)}&yt2pdf_origin_tab=${originTabId}`;
 
     // Fail-safe watchdog: forceful cleanup after 45 seconds
     extractionRecord.watchdog = setTimeout(() => {
@@ -236,10 +247,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const winOptions = {
       url: targetUrl,
       focused: false,
-      state: "minimized",
       type: "popup",
-      width: 400,
-      height: 300,
+      width: 320,
+      height: 240,
       left: 25000,
       top: 25000
     };
@@ -286,6 +296,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // 2. Real-time Progress Forwarding from Headless Window to Active Tab
   if (message.action === "headless_progress") {
     const pending = findExtraction(sender);
+    const targetOriginTabId = message.originTabId || pending?.originTabId;
     if (pending) {
       if (pending.watchdog) {
         clearTimeout(pending.watchdog);
@@ -294,13 +305,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           cleanupExtraction(pending.tabId || pending.windowId, "Slide extraction stalled.");
         }, 25000);
       }
-      if (pending.originTabId) {
-        chrome.tabs.sendMessage(pending.originTabId, {
-          action: "extraction_progress_update",
-          current: message.current,
-          total: message.total
-        }).catch(() => {});
-      }
+    }
+    if (targetOriginTabId) {
+      chrome.tabs.sendMessage(targetOriginTabId, {
+        action: "extraction_progress_update",
+        current: message.current,
+        total: message.total
+      }).catch(() => {});
     }
     return false;
   }
@@ -308,6 +319,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // 3. Extraction Success: Save Deck, Destroy Background Window, Route to Web Studio
   if (message.action === "headless_extraction_complete") {
     const pending = findExtraction(sender);
+    const targetOriginTabId = message.originTabId || pending?.originTabId;
     const deck = message.deck;
     const deckId = deck?.deckId || `deck_${Date.now()}`;
     const slideCount = message.slideCount || deck?.slideCount || 0;
@@ -315,7 +327,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Save presentation deck in extension local storage
     chrome.storage.local.set({
       [deckId]: deck,
-      latest_deck_id: deckId
+      latest_deck_id: deckId,
+      last_deck_id: deckId
     }, async () => {
       // Find open tabs and resolve correct target base (strictly avoids unrelated dev ports like 3000)
       let allTabs = [];
@@ -342,6 +355,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       } else {
         if (sender.tab?.windowId) chrome.windows.remove(sender.tab.windowId).catch(() => {});
         if (sender.tab?.id) chrome.tabs.remove(sender.tab.id).catch(() => {});
+        if (targetOriginTabId) {
+          chrome.tabs.sendMessage(targetOriginTabId, {
+            action: "extraction_finished",
+            success: true,
+            data: { deckId: deckId, slideCount: slideCount, url: destUrl }
+          }).catch(() => {});
+        }
       }
     });
 
@@ -368,14 +388,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
 
       // Re-create silent window for attempt 2
-      const targetUrl = `https://www.youtube.com/watch?v=${pending.videoId}&yt2pdf_headless=1&yt2pdf_duration=${pending.duration}&yt2pdf_title=${encodeURIComponent(pending.videoTitle)}`;
+      const targetUrl = `https://www.youtube.com/watch?v=${pending.videoId}&yt2pdf_headless=1&yt2pdf_duration=${pending.duration}&yt2pdf_title=${encodeURIComponent(pending.videoTitle)}&yt2pdf_origin_tab=${pending.originTabId}`;
       chrome.windows.create({
         url: targetUrl,
         focused: false,
-        state: "minimized",
         type: "popup",
-        width: 400,
-        height: 300,
+        width: 320,
+        height: 240,
         left: 25000,
         top: 25000
       }, (newWin) => {

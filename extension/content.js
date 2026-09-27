@@ -13,6 +13,11 @@
  */
 
 (function () {
+  // Never run companion content script inside sub-frames or ad iframes
+  if (window.self !== window.top) {
+    return;
+  }
+
   const isHeadless = new URLSearchParams(window.location.search).get("yt2pdf_headless") === "1";
 
   // ─────────────────────────────────────────────
@@ -133,12 +138,24 @@
     async function runHeadlessExtraction() {
       console.log("[YT2PDF Headless] Initializing silent background extraction...");
 
+      const originTabParam = new URLSearchParams(window.location.search).get("yt2pdf_origin_tab");
+      const originTabId = originTabParam ? parseInt(originTabParam, 10) : null;
+
+      // Immediate progress signal to origin tab
+      safeSendRuntimeMessage({
+        action: "headless_progress",
+        originTabId: originTabId,
+        current: 1,
+        total: 35
+      });
+
       // 1. Fail-Safe Suicide Watchdog (45s max): Guarantees window is destroyed even on error
       const suicideTimer = setTimeout(() => {
         console.warn("[YT2PDF Headless] Suicide watchdog reached 45s. Closing window.");
         try {
           safeSendRuntimeMessage({
             action: "headless_extraction_failed",
+            originTabId: originTabId,
             error: "Extraction timed out in background window."
           });
           window.close();
@@ -208,6 +225,8 @@
           bannerBtns.forEach(btn => { try { btn.click(); } catch(e) {} });
           const consentBtn = document.querySelector("ytd-button-renderer#confirm-button button, .yt-confirm-dialog-renderer #confirm-button button");
           if (consentBtn) { try { consentBtn.click(); } catch(e) {} }
+          const playBtn = document.querySelector(".ytp-large-play-button, .ytp-play-button");
+          if (videoEl && videoEl.paused && playBtn) { try { playBtn.click(); } catch(e) {} }
         } catch (e) {}
       }
 
@@ -226,6 +245,7 @@
           const errReason = errorScreen.querySelector(".ytp-error-content-reason")?.textContent?.trim() || "Video unavailable";
           safeSendRuntimeMessage({
             action: "headless_extraction_failed",
+            originTabId: originTabId,
             error: `YouTube error: ${errReason}`
           });
           clearTimeout(suicideTimer);
@@ -274,6 +294,7 @@
         console.warn("[YT2PDF Headless] Video element or duration not ready after 12s.");
         safeSendRuntimeMessage({
           action: "headless_extraction_failed",
+          originTabId: originTabId,
           error: "Unable to load YouTube video stream in background."
         });
         clearTimeout(suicideTimer);
@@ -376,6 +397,7 @@
           // Forward progress update to active tab
           safeSendRuntimeMessage({
             action: "headless_progress",
+            originTabId: originTabId,
             current: i + 1,
             total: samplePoints.length
           });
@@ -452,6 +474,7 @@
         // Notify background service worker of completion
         safeSendRuntimeMessage({
           action: "headless_extraction_complete",
+          originTabId: originTabId,
           deck: deckPayload,
           slideCount: capturedSlides.length
         });
@@ -466,6 +489,7 @@
         console.error("[YT2PDF Headless] Extraction error:", err);
         safeSendRuntimeMessage({
           action: "headless_extraction_failed",
+          originTabId: originTabId,
           error: err.message || "Extraction error in background window"
         });
         clearTimeout(suicideTimer);
