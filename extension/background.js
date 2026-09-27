@@ -197,13 +197,15 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 });
 
 chrome.windows.onRemoved.addListener((closedWinId) => {
-  if (activeExtractions.has(`win_${closedWinId}`)) {
+  const item = activeExtractions.get(`win_${closedWinId}`);
+  if (item && !item.completed) {
     cleanupExtraction(`win_${closedWinId}`, "Slide extraction window was closed before completing.");
   }
 });
 
 chrome.tabs.onRemoved.addListener((closedTabId) => {
-  if (activeExtractions.has(closedTabId)) {
+  const item = activeExtractions.get(closedTabId);
+  if (item && !item.completed) {
     cleanupExtraction(closedTabId, "Slide extraction tab was closed before completing.");
   }
 });
@@ -248,8 +250,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       url: targetUrl,
       focused: false,
       type: "popup",
-      width: 320,
-      height: 240,
+      width: 1280,
+      height: 720,
       left: 25000,
       top: 25000
     };
@@ -324,6 +326,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const deckId = deck?.deckId || `deck_${Date.now()}`;
     const slideCount = message.slideCount || deck?.slideCount || 0;
 
+    // Immediately mark as successfully completed to prevent any premature onRemoved error
+    if (pending) {
+      pending.completed = true;
+      if (pending.watchdog) {
+        clearTimeout(pending.watchdog);
+        pending.watchdog = null;
+      }
+    }
+
     // Save presentation deck in extension local storage
     chrome.storage.local.set({
       [deckId]: deck,
@@ -393,8 +404,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         url: targetUrl,
         focused: false,
         type: "popup",
-        width: 320,
-        height: 240,
+        width: 1280,
+        height: 720,
         left: 25000,
         top: 25000
       }, (newWin) => {

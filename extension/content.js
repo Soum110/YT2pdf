@@ -235,7 +235,7 @@
       let resolvedDuration = 0;
       const waitStart = Date.now();
 
-      while (Date.now() - waitStart < 12000) {
+      while (Date.now() - waitStart < 20000) {
         video = document.querySelector("video.html5-main-video, video");
         dismissOverlaysAndSkipAds(video);
 
@@ -291,7 +291,7 @@
       }
 
       if (!video || !resolvedDuration) {
-        console.warn("[YT2PDF Headless] Video element or duration not ready after 12s.");
+        console.warn("[YT2PDF Headless] Video element or duration not ready after 20s.");
         safeSendRuntimeMessage({
           action: "headless_extraction_failed",
           originTabId: originTabId,
@@ -479,11 +479,11 @@
           slideCount: capturedSlides.length
         });
 
-        // Fail-Safe: Clear suicide timer and immediately close the background window
+        // Fail-Safe: Clear suicide timer and allow background service worker to close window after saving
         clearTimeout(suicideTimer);
         setTimeout(() => {
           try { window.close(); } catch(e) {}
-        }, 100);
+        }, 10000);
 
       } catch (err) {
         console.error("[YT2PDF Headless] Extraction error:", err);
@@ -867,7 +867,8 @@
             if (btn) {
               btn.innerHTML = `<span>Failed</span>`;
             }
-            showToast("Slide extraction could not be completed for this video.", true);
+            const errMsg = request.error || "Slide extraction could not be completed for this video.";
+            showToast(errMsg, true);
             setTimeout(() => resetButton(btn), 3500);
           }
         }
